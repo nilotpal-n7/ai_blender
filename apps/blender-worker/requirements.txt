@@ -1,0 +1,5 @@
+# Pinned dependencies for reproducible Docker builds
+# Generated from pyproject.toml — keep in sync
+usd-core>=24.11
+redis>=5.0.0
+numpy>=1.26.0

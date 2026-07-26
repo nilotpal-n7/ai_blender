@@ -1,0 +1,80 @@
+services:
+  # ========================
+  # Redis — shared message broker
+  # ========================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ai-blender-net
+
+  # ========================
+  # Next.js Frontend
+  # ========================
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: ../../infra/docker/web.Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://orchestrator:8080/api/v1
+    volumes:
+      - ./apps/web/src:/app/src
+    depends_on:
+      orchestrator:
+        condition: service_started
+    networks:
+      - ai-blender-net
+
+  # ========================
+  # Go Orchestrator
+  # ========================
+  orchestrator:
+    build:
+      context: ./apps/orchestrator
+      dockerfile: ../../infra/docker/orchestrator.Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - ORCHESTRATOR_PORT=8080
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ai-blender-net
+
+  # ========================
+  # Blender Worker
+  # ========================
+  blender-worker:
+    build:
+      context: ./apps/blender-worker
+      dockerfile: Dockerfile
+    environment:
+      - WORKER_REDIS_ADDR=redis:6379
+      - WORKER_REDIS_PASSWORD=
+      - WORKER_JOB_QUEUE=blender:jobs
+      - BLENDER_BIN=/usr/local/blender/blender
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ai-blender-net
+
+volumes:
+  redis-data:
+
+networks:
+  ai-blender-net:
+    driver: bridge

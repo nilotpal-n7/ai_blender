@@ -1,0 +1,143 @@
+@import "tailwindcss";
+
+/* ─── Design Token System (Dark-Mode First) ──────────────────────── */
+
+:root {
+  /* Surface palette */
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #12121a;
+  --bg-tertiary: #1a1a28;
+  --bg-elevated: #222236;
+  --bg-glass: rgba(18, 18, 26, 0.85);
+
+  /* Border & dividers */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-active: rgba(124, 100, 255, 0.4);
+
+  /* Text */
+  --text-primary: #f0f0f5;
+  --text-secondary: #9595b0;
+  --text-muted: #5a5a78;
+  --text-inverse: #0a0a0f;
+
+  /* Brand accent */
+  --accent-primary: #7c64ff;
+  --accent-secondary: #5b42e8;
+  --accent-glow: rgba(124, 100, 255, 0.15);
+  --accent-gradient: linear-gradient(135deg, #7c64ff 0%, #00d4ff 100%);
+
+  /* Semantic */
+  --success: #00e676;
+  --warning: #ffab40;
+  --error: #ff5252;
+
+  /* Viewport */
+  --viewport-bg: #0d0d14;
+  --grid-color: rgba(124, 100, 255, 0.08);
+
+  /* Spacing */
+  --sidebar-width: 360px;
+  --header-height: 48px;
+  --panel-radius: 12px;
+  --panel-padding: 16px;
+
+  /* Transitions */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+}
+
+@theme inline {
+  --color-background: var(--bg-primary);
+  --color-foreground: var(--text-primary);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ─── Global Resets ──────────────────────────────────────────────── */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-tertiary) transparent;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans, "Inter", system-ui, -apple-system, sans-serif);
+  overflow: hidden;
+}
+
+/* ─── Utility Classes ────────────────────────────────────────────── */
+
+.glass-panel {
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--panel-radius);
+}
+
+.glow-border {
+  box-shadow:
+    0 0 0 1px var(--border-active),
+    0 0 20px var(--accent-glow);
+}
+
+.text-gradient {
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Animations ─────────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+  50% {
+    box-shadow: 0 0 24px var(--accent-glow);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s var(--ease-out) forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-tertiary) 25%,
+    var(--bg-elevated) 50%,
+    var(--bg-tertiary) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
