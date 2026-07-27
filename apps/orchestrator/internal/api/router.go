@@ -2,12 +2,17 @@ package api
 
 import (
 	"github.com/ai-blender/orchestrator/internal/config"
+	"github.com/ai-blender/orchestrator/internal/queue"
 	"github.com/gin-gonic/gin"
 )
 
 // NewRouter creates and configures the Gin engine with all route groups.
-func NewRouter(cfg *config.Config) *gin.Engine {
+// It accepts a queue client for dependency injection into handlers.
+func NewRouter(cfg *config.Config, queueClient *queue.Client) *gin.Engine {
 	router := gin.Default()
+
+	// Create handler with dependencies
+	h := NewHandler(queueClient)
 
 	// ─── Global Middleware ──────────────────────────────────────────
 	router.Use(CORSMiddleware())
@@ -16,15 +21,21 @@ func NewRouter(cfg *config.Config) *gin.Engine {
 	v1 := router.Group("/api/v1")
 	{
 		// Health check
-		v1.GET("/health", HealthCheck)
+		v1.GET("/health", h.HealthCheck)
 
-		// Scene management (stubs for future implementation)
+		// Scene management
 		scene := v1.Group("/scene")
 		{
-			scene.POST("/create", SceneCreateStub)
-			scene.GET("/:id", SceneGetStub)
-			scene.POST("/:id/prompt", ScenePromptStub)
-			scene.POST("/:id/override", SceneOverrideStub)
+			scene.POST("/create", h.SceneCreate)
+			scene.GET("/:id", h.SceneGet)
+			scene.POST("/:id/prompt", h.ScenePrompt)
+			scene.POST("/:id/override", h.SceneOverride)
+		}
+
+		// Job status
+		job := v1.Group("/job")
+		{
+			job.GET("/:id/status", h.JobStatus)
 		}
 	}
 

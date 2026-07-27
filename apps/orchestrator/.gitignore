@@ -1,0 +1,13 @@
+# ========================
+# Go
+# ========================
+apps/orchestrator/bin/
+apps/orchestrator/tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/

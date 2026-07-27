@@ -9,6 +9,7 @@ import (
 
 	"github.com/ai-blender/orchestrator/internal/api"
 	"github.com/ai-blender/orchestrator/internal/config"
+	"github.com/ai-blender/orchestrator/internal/queue"
 )
 
 func main() {
@@ -18,8 +19,15 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Initialize router with all middleware and routes
-	router := api.NewRouter(cfg)
+	// Initialize Redis queue client
+	queueClient, err := queue.NewClient(cfg.RedisAddr, cfg.RedisPassword)
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	defer queueClient.Close()
+
+	// Initialize router with all middleware, routes, and dependencies
+	router := api.NewRouter(cfg, queueClient)
 
 	// Graceful shutdown listener
 	quit := make(chan os.Signal, 1)
