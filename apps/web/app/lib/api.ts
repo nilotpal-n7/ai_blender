@@ -50,6 +50,28 @@ export interface ApiError {
   message: string;
 }
 
+export interface ComposedResponse {
+  scene_id: string;
+  usda: string;
+  size: number;
+}
+
+export interface LayerInfo {
+  scene_id: string;
+  has_base_layer: boolean;
+  base_layer_size: number;
+  override_count: number;
+  composed_size: number;
+  overrides?: string[];
+}
+
+export interface OverrideResponse {
+  status: string;
+  scene_id: string;
+  override_count: number;
+  message: string;
+}
+
 // ─── Fetch Wrapper ──────────────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -145,4 +167,39 @@ export async function pollJobUntilDone(
   }
 
   throw new Error(`Job ${jobId} timed out after ${maxAttempts} attempts`);
+}
+
+// ─── USD Layer API ──────────────────────────────────────────────────
+
+/**
+ * Get the composed (flattened) USDA state for a scene.
+ */
+export async function getComposedState(
+  sceneId: string
+): Promise<ComposedResponse> {
+  return apiFetch<ComposedResponse>(`/scene/${sceneId}/composed`);
+}
+
+/**
+ * Get layer stack info for a scene.
+ */
+export async function getSceneLayers(
+  sceneId: string,
+  includeContent = false
+): Promise<LayerInfo> {
+  const query = includeContent ? "?content=true" : "";
+  return apiFetch<LayerInfo>(`/scene/${sceneId}/layers${query}`);
+}
+
+/**
+ * Submit a USD override layer to a scene.
+ */
+export async function submitOverride(
+  sceneId: string,
+  overrideUsda: string
+): Promise<OverrideResponse> {
+  return apiFetch<OverrideResponse>(`/scene/${sceneId}/override`, {
+    method: "POST",
+    body: JSON.stringify({ override_usda: overrideUsda }),
+  });
 }

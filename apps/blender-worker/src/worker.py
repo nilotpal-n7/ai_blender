@@ -10,6 +10,9 @@ Each job contains:
     - prompt: Text prompt for generation
     - status: Current job status
 
+The worker produces real USD output and stores base layers + composed
+state in Redis for the orchestrator to serve.
+
 The worker runs inside a headless Blender process via:
     blender --background --python src/worker.py
 """
@@ -112,6 +115,40 @@ def report_status(
         logger.error("Failed to update job status for %s: %s", job_id, e)
 
 
+# ─── USD Layer Storage ──────────────────────────────────────────────
+
+
+def store_scene_layers(
+    client: redis.Redis,
+    scene_id: str,
+    base_layer_usda: str,
+    composed_usda: str,
+) -> None:
+    """Store USD scene layers in Redis for orchestrator access.
+
+    Keys:
+        scene:{id}:base_layer  — the AI-generated base USDA
+        scene:{id}:composed    — the flattened composed state
+
+    Args:
+        client: Redis connection.
+        scene_id: The scene identifier.
+        base_layer_usda: Base layer USDA text.
+        composed_usda: Composed/flattened USDA text.
+    """
+    try:
+        pipe = client.pipeline()
+        pipe.set(f"scene:{scene_id}:base_layer", base_layer_usda)
+        pipe.expire(f"scene:{scene_id}:base_layer", 7 * 24 * 3600)  # 7 days
+        pipe.set(f"scene:{scene_id}:composed", composed_usda)
+        pipe.expire(f"scene:{scene_id}:composed", 7 * 24 * 3600)
+        pipe.execute()
+        logger.info("💾 Stored USD layers for scene %s (base=%d, composed=%d chars)",
+                     scene_id, len(base_layer_usda), len(composed_usda))
+    except redis.RedisError as e:
+        logger.error("Failed to store scene layers for %s: %s", scene_id, e)
+
+
 # ─── Job Processing ─────────────────────────────────────────────────
 
 
@@ -138,16 +175,37 @@ def process_job(client: redis.Redis, job_data: dict) -> None:
 
     try:
         if job_type == "assemble":
-            # TODO: Import and call assembler.assemble_scene(job_data)
-            # For now, simulate processing with a brief delay
             logger.info("Job %s: Assembling scene for prompt: '%s'", job_id, prompt[:80])
-            time.sleep(2)  # Simulate assembly work
 
-            # Report success with placeholder result
+            # Fetch existing overrides if any
+            overrides_key = f"scene:{scene_id}:overrides"
+            existing_overrides = client.lrange(overrides_key, 0, -1)
+
+            # Build job data with overrides for assembler
+            assemble_data = {
+                "scene_id": scene_id,
+                "prompt": prompt,
+                "overrides": existing_overrides if existing_overrides else None,
+            }
+
+            # Run the real assembler
+            from src.assembler import assemble_scene
+            result = assemble_scene(assemble_data)
+
+            # Store layers in Redis
+            store_scene_layers(
+                client,
+                scene_id,
+                result["base_layer_usda"],
+                result["composed_usda"],
+            )
+
+            # Report success
             report_status(client, job_id, "completed", result={
                 "scene_id": scene_id,
-                "output": "placeholder — assembly not yet implemented",
-                "assets_generated": 0,
+                "objects_count": result["objects_count"],
+                "base_layer_size": len(result["base_layer_usda"]),
+                "composed_size": len(result["composed_usda"]),
             })
 
         elif job_type == "render":

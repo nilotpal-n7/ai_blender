@@ -5,7 +5,10 @@ import {
   createScene,
   submitPrompt,
   pollJobUntilDone,
+  getComposedState,
+  getSceneLayers,
   type Job,
+  type LayerInfo,
 } from "../lib/api";
 
 // ─── Job Status Labels ──────────────────────────────────────────────
@@ -48,6 +51,7 @@ const STATUS_CONFIG: Record<
  * 1. Creates a scene on first prompt submission
  * 2. Enqueues assembly jobs via POST /scene/:id/prompt
  * 3. Polls GET /job/:id/status until completion
+ * 4. Fetches and displays composed USDA + layer info after completion
  */
 export default function PromptPanel() {
   const [prompt, setPrompt] = useState("");
@@ -57,11 +61,29 @@ export default function PromptPanel() {
     { jobId: string; prompt: string; status: string }[]
   >([]);
 
+  // USD Layer State
+  const [layerInfo, setLayerInfo] = useState<LayerInfo | null>(null);
+  const [composedUsda, setComposedUsda] = useState<string | null>(null);
+  const [showUsda, setShowUsda] = useState(false);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sceneIdRef = useRef<string | null>(null);
 
   const isProcessing = jobStatus === "queued" || jobStatus === "processing";
   const statusConfig = STATUS_CONFIG[jobStatus] || STATUS_CONFIG.idle;
+
+  const fetchLayerData = useCallback(async (sceneId: string) => {
+    try {
+      const [layers, composed] = await Promise.all([
+        getSceneLayers(sceneId),
+        getComposedState(sceneId),
+      ]);
+      setLayerInfo(layers);
+      setComposedUsda(composed.usda);
+    } catch {
+      // Layer data not available yet — not an error
+    }
+  }, []);
 
   const handleSubmit = useCallback(async () => {
     if (!prompt.trim() || isProcessing) return;
@@ -91,7 +113,6 @@ export default function PromptPanel() {
       // Poll until completion
       const finalJob = await pollJobUntilDone(job_id, (job: Job) => {
         setJobStatus(job.status);
-        // Update history entry
         setJobHistory((prev) =>
           prev.map((entry) =>
             entry.jobId === job_id
@@ -106,11 +127,15 @@ export default function PromptPanel() {
         setJobStatus("failed");
       } else {
         setJobStatus("completed");
-        // Reset to idle after showing completion briefly
+
+        // Fetch USD layer data after successful completion
+        if (sceneIdRef.current) {
+          await fetchLayerData(sceneIdRef.current);
+        }
+
         setTimeout(() => setJobStatus("idle"), 3000);
       }
 
-      // Clear prompt on success
       if (finalJob.status === "completed") {
         setPrompt("");
       }
@@ -119,7 +144,7 @@ export default function PromptPanel() {
       setLastError(message);
       setJobStatus("failed");
     }
-  }, [prompt, isProcessing]);
+  }, [prompt, isProcessing, fetchLayerData]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -173,7 +198,6 @@ export default function PromptPanel() {
 
       {/* Prompt Input Area */}
       <div className="flex-1 flex flex-col p-4 gap-3 overflow-hidden">
-        {/* Textarea */}
         <div className="flex-1 relative">
           <textarea
             ref={textareaRef}
@@ -181,7 +205,7 @@ export default function PromptPanel() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Describe your 3D scene...\n\ne.g., "A cyberpunk street at night with neon signs, a parked motorcycle, and rain puddles reflecting the lights"`}
+            placeholder={`Describe your 3D scene...\n\ne.g., "A red cube on a wooden table with a spotlight"`}
             disabled={isProcessing}
             className="w-full h-full resize-none rounded-lg p-3 text-sm font-mono outline-none transition-all focus:ring-1"
             style={{
@@ -237,8 +261,12 @@ export default function PromptPanel() {
         >
           {isProcessing ? (
             <span className="flex items-center justify-center gap-2">
-              <span className="inline-block w-4 h-4 rounded-full border-2 border-t-transparent animate-spin"
-                style={{ borderColor: "var(--accent-primary)", borderTopColor: "transparent" }}
+              <span
+                className="inline-block w-4 h-4 rounded-full border-2 border-t-transparent animate-spin"
+                style={{
+                  borderColor: "var(--accent-primary)",
+                  borderTopColor: "transparent",
+                }}
               />
               {jobStatus === "queued" ? "Queued..." : "Generating..."}
             </span>
@@ -258,7 +286,6 @@ export default function PromptPanel() {
           )}
         </button>
 
-        {/* Info Footer */}
         <p
           className="text-xs text-center"
           style={{ color: "var(--text-muted)" }}
@@ -267,9 +294,122 @@ export default function PromptPanel() {
         </p>
       </div>
 
+      {/* USD Layers Panel */}
+      <div
+        className="shrink-0 px-4 py-3"
+        style={{ borderTop: "1px solid var(--border-subtle)" }}
+      >
+        <div className="flex items-center justify-between">
+          <span
+            className="text-xs font-semibold uppercase tracking-wide"
+            style={{ color: "var(--text-muted)" }}
+          >
+            USD Layers
+          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="text-xs font-mono px-1.5 py-0.5 rounded"
+              style={{
+                background: "var(--bg-tertiary)",
+                color: "var(--text-muted)",
+              }}
+            >
+              {layerInfo
+                ? `${layerInfo.has_base_layer ? 1 : 0} + ${layerInfo.override_count}`
+                : "0"}
+            </span>
+            {composedUsda && (
+              <button
+                onClick={() => setShowUsda(!showUsda)}
+                className="text-xs font-mono px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                style={{
+                  background: showUsda
+                    ? "var(--accent-primary)"
+                    : "var(--bg-tertiary)",
+                  color: showUsda ? "white" : "var(--text-muted)",
+                }}
+              >
+                {showUsda ? "Hide" : "View"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Layer Stack Summary */}
+        {layerInfo && layerInfo.has_base_layer ? (
+          <div className="mt-2 flex flex-col gap-1">
+            <div
+              className="flex items-center gap-2 text-xs px-2 py-1 rounded"
+              style={{ background: "var(--bg-tertiary)" }}
+            >
+              <div
+                className="w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ background: "var(--accent-primary)" }}
+              />
+              <span
+                className="flex-1 font-mono"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Base Layer
+              </span>
+              <span
+                className="font-mono"
+                style={{ color: "var(--text-muted)" }}
+              >
+                {(layerInfo.base_layer_size / 1024).toFixed(1)}KB
+              </span>
+            </div>
+            {layerInfo.override_count > 0 && (
+              <div
+                className="flex items-center gap-2 text-xs px-2 py-1 rounded"
+                style={{ background: "var(--bg-tertiary)" }}
+              >
+                <div
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ background: "var(--warning)" }}
+                />
+                <span
+                  className="flex-1 font-mono"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {layerInfo.override_count} Override
+                  {layerInfo.override_count !== 1 ? "s" : ""}
+                </span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p
+            className="text-xs mt-1"
+            style={{ color: "var(--text-muted)", opacity: 0.6 }}
+          >
+            No layers yet. Generate a scene to begin.
+          </p>
+        )}
+
+        {/* Collapsible USDA Preview */}
+        {showUsda && composedUsda && (
+          <div className="mt-2">
+            <pre
+              className="text-xs font-mono p-2 rounded-lg overflow-auto"
+              style={{
+                background: "var(--bg-primary)",
+                color: "var(--text-secondary)",
+                border: "1px solid var(--border-subtle)",
+                maxHeight: "200px",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-all",
+              }}
+            >
+              {composedUsda}
+            </pre>
+          </div>
+        )}
+      </div>
+
       {/* Job History Panel */}
       <div
-        className="shrink-0 px-4 py-3 max-h-48 overflow-y-auto"
+        className="shrink-0 px-4 py-3 max-h-36 overflow-y-auto"
         style={{ borderTop: "1px solid var(--border-subtle)" }}
       >
         <div className="flex items-center justify-between mb-2">
@@ -309,8 +449,7 @@ export default function PromptPanel() {
                   className="w-1.5 h-1.5 rounded-full shrink-0"
                   style={{
                     background:
-                      (STATUS_CONFIG[entry.status] || STATUS_CONFIG.idle)
-                        .color,
+                      (STATUS_CONFIG[entry.status] || STATUS_CONFIG.idle).color,
                   }}
                 />
                 <span

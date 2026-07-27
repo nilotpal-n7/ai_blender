@@ -1,58 +1,71 @@
-"""Assembler — bpy scene composition from AI-generated assets.
+"""Assembler — Scene composition from prompts and USD layers.
 
-This module is responsible for programmatically assembling a 3D scene
-inside headless Blender using the `bpy` API. It receives instructions
-from the worker's job payload and:
+This module generates 3D scenes from text prompts using OpenUSD.
+Currently uses procedural geometry via pxr; will integrate AI-generated
+assets (Hunyuan3D, TRELLIS) in the future.
 
-1. Imports AI-generated mesh assets (.glb, .obj, .fbx) into the scene
-2. Applies AI-generated textures/materials
-3. Configures lighting, cameras, and environment
-4. Positions objects according to the USD stage layout
-5. Exports the assembled scene as a .usdz Base Layer
+The assembler:
+1. Generates a base layer USDA from the prompt via usd_utils
+2. If existing overrides are provided, composes them on top
+3. Returns both the base layer and composed state as USDA text
 
-All operations assume a headless Blender context (no UI, no OpenGL).
-GPU-accelerated operations (e.g., texture baking) require proper
-NVIDIA container toolkit configuration in Docker.
-
-Usage:
-    Called by worker.py when job_type == "assemble"
-
-    from src.assembler import assemble_scene
-    assemble_scene(job_data)
+Called by worker.py when job_type == "assemble".
 """
 
 import logging
+from typing import Optional
+
+from src.usd_utils import (
+    create_scene_from_prompt,
+    get_composed_state_as_text,
+)
 
 logger = logging.getLogger("blender-worker.assembler")
 
 
-def assemble_scene(job_data: dict) -> str:
-    """Assemble a 3D scene from AI-generated assets.
+def assemble_scene(job_data: dict) -> dict:
+    """Assemble a 3D scene from a text prompt.
+
+    Generates a procedural USD scene based on prompt keywords,
+    then composes any existing user overrides on top.
 
     Args:
         job_data: Job payload containing:
             - scene_id: Unique scene identifier
-            - assets: List of asset URLs to import
-            - layout: USD-derived positioning instructions
-            - lighting: Lighting configuration
-            - camera: Camera parameters
+            - prompt: Text description of the scene
+            - overrides: Optional list of USDA override strings
 
     Returns:
-        Path to the exported .usdz Base Layer file.
-
-    Raises:
-        NotImplementedError: This function is not yet implemented.
+        Dict with:
+            - base_layer_usda: The AI-generated base layer
+            - composed_usda: The flattened state with overrides applied
+            - objects_count: Number of objects in the scene
     """
     scene_id = job_data.get("scene_id", "unknown")
-    logger.info("Assembling scene %s — not yet implemented", scene_id)
+    prompt = job_data.get("prompt", "")
+    overrides: Optional[list[str]] = job_data.get("overrides")
 
-    # TODO: Implementation steps:
-    # 1. bpy.ops.wm.read_factory_settings(use_empty=True)
-    # 2. Import each asset from job_data["assets"]
-    # 3. Apply transforms from job_data["layout"]
-    # 4. Configure lighting from job_data["lighting"]
-    # 5. Set up camera from job_data["camera"]
-    # 6. Export via bpy.ops.wm.usd_export()
-    # 7. Return the output .usdz file path
+    logger.info("Assembling scene %s for prompt: '%s'", scene_id, prompt[:100])
 
-    raise NotImplementedError("Scene assembly is not yet implemented")
+    # Generate base layer from prompt
+    base_layer_usda = create_scene_from_prompt(prompt)
+    logger.info("Generated base layer: %d chars", len(base_layer_usda))
+
+    # Compose with any existing overrides
+    if overrides:
+        composed_usda = get_composed_state_as_text(base_layer_usda, overrides)
+        logger.info("Composed with %d overrides: %d chars",
+                     len(overrides), len(composed_usda))
+    else:
+        composed_usda = base_layer_usda
+
+    # Count objects (rough heuristic from USDA)
+    objects_count = base_layer_usda.count("def ") - 1  # Subtract Materials defs
+
+    logger.info("✅ Scene %s assembled: %d objects", scene_id, max(0, objects_count))
+
+    return {
+        "base_layer_usda": base_layer_usda,
+        "composed_usda": composed_usda,
+        "objects_count": max(0, objects_count),
+    }

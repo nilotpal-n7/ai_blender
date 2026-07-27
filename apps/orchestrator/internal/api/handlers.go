@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ai-blender/orchestrator/internal/queue"
+	"github.com/ai-blender/orchestrator/internal/scene"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -13,12 +14,13 @@ import (
 
 // Handler holds dependencies for all API handlers.
 type Handler struct {
-	Queue *queue.Client
+	Queue  *queue.Client
+	Scenes *scene.Manager
 }
 
-// NewHandler creates a new Handler with the given queue client.
-func NewHandler(q *queue.Client) *Handler {
-	return &Handler{Queue: q}
+// NewHandler creates a new Handler with the given dependencies.
+func NewHandler(q *queue.Client, s *scene.Manager) *Handler {
+	return &Handler{Queue: q, Scenes: s}
 }
 
 // ─── Health ─────────────────────────────────────────────────────────
@@ -58,9 +60,9 @@ func (h *Handler) SceneCreate(c *gin.Context) {
 	}
 
 	sceneID := uuid.New().String()
-	scene := queue.NewScene(sceneID, req.Name)
+	sc := queue.NewScene(sceneID, req.Name)
 
-	if err := h.Queue.CreateScene(c.Request.Context(), scene); err != nil {
+	if err := h.Queue.CreateScene(c.Request.Context(), sc); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "scene_creation_failed",
 			"message": err.Error(),
@@ -69,10 +71,10 @@ func (h *Handler) SceneCreate(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"scene_id":   scene.ID,
-		"name":       scene.Name,
-		"status":     scene.Status,
-		"created_at": scene.CreatedAt,
+		"scene_id":   sc.ID,
+		"name":       sc.Name,
+		"status":     sc.Status,
+		"created_at": sc.CreatedAt,
 	})
 }
 
@@ -81,7 +83,7 @@ func (h *Handler) SceneCreate(c *gin.Context) {
 func (h *Handler) SceneGet(c *gin.Context) {
 	sceneID := c.Param("id")
 
-	scene, err := h.Queue.GetScene(c.Request.Context(), sceneID)
+	sc, err := h.Queue.GetScene(c.Request.Context(), sceneID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":    "scene_not_found",
@@ -91,7 +93,7 @@ func (h *Handler) SceneGet(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, scene)
+	c.JSON(http.StatusOK, sc)
 }
 
 // ─── Prompt Submission ──────────────────────────────────────────────
@@ -151,18 +153,121 @@ func (h *Handler) ScenePrompt(c *gin.Context) {
 	})
 }
 
-// ─── Override Layer (stub — needs USD pipeline from step #2) ────────
+// ─── Override Layer ─────────────────────────────────────────────────
+
+// SceneOverrideRequest is the JSON body for POST /scene/:id/override.
+type SceneOverrideRequest struct {
+	OverrideUSDA string `json:"override_usda" binding:"required"`
+}
 
 // SceneOverride handles POST /api/v1/scene/:id/override
-// This endpoint will accept a USD Override Layer (text diff) from the frontend
-// and merge it into the scene's state stack.
+// Accepts a USD Override Layer (USDA text) from the frontend and
+// pushes it onto the scene's override stack.
 func (h *Handler) SceneOverride(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error":    "not_implemented",
-		"message":  "Override layer ingestion requires the USD pipeline (step #2).",
-		"scene_id": id,
+	sceneID := c.Param("id")
+
+	// Verify scene exists
+	_, err := h.Queue.GetScene(c.Request.Context(), sceneID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":    "scene_not_found",
+			"message":  err.Error(),
+			"scene_id": sceneID,
+		})
+		return
+	}
+
+	// Parse request
+	var req SceneOverrideRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid_request",
+			"message": "Request body must include an 'override_usda' field.",
+		})
+		return
+	}
+
+	// Push override to scene layer stack
+	if err := h.Scenes.PushOverride(c.Request.Context(), sceneID, req.OverrideUSDA); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "override_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Get updated layer count
+	info, _ := h.Scenes.GetLayerInfo(c.Request.Context(), sceneID, false)
+	overrideCount := 0
+	if info != nil {
+		overrideCount = info.OverrideCount
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":         "override_applied",
+		"scene_id":       sceneID,
+		"override_count": overrideCount,
+		"message":        "Override layer pushed to scene stack.",
 	})
+}
+
+// ─── Composed State ─────────────────────────────────────────────────
+
+// SceneComposed handles GET /api/v1/scene/:id/composed
+// Returns the flattened USDA of the composed scene state.
+func (h *Handler) SceneComposed(c *gin.Context) {
+	sceneID := c.Param("id")
+
+	// Try cached composed first
+	composed, err := h.Scenes.GetComposed(c.Request.Context(), sceneID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "retrieval_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// If no composed state, fall back to base layer
+	if composed == "" {
+		composed, err = h.Scenes.GetBaseLayer(c.Request.Context(), sceneID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":    "no_scene_data",
+				"message":  "No base layer or composed state found. Submit a prompt first.",
+				"scene_id": sceneID,
+			})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"scene_id": sceneID,
+		"usda":     composed,
+		"size":     len(composed),
+	})
+}
+
+// ─── Layer Stack Info ───────────────────────────────────────────────
+
+// SceneLayers handles GET /api/v1/scene/:id/layers
+// Returns the full layer stack info for debugging.
+func (h *Handler) SceneLayers(c *gin.Context) {
+	sceneID := c.Param("id")
+
+	// Check if content should be included
+	includeContent := c.Query("content") == "true"
+
+	info, err := h.Scenes.GetLayerInfo(c.Request.Context(), sceneID, includeContent)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "layer_info_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, info)
 }
 
 // ─── Job Status ─────────────────────────────────────────────────────

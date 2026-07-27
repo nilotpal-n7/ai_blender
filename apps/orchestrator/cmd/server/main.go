@@ -10,6 +10,7 @@ import (
 	"github.com/ai-blender/orchestrator/internal/api"
 	"github.com/ai-blender/orchestrator/internal/config"
 	"github.com/ai-blender/orchestrator/internal/queue"
+	"github.com/ai-blender/orchestrator/internal/scene"
 )
 
 func main() {
@@ -22,12 +23,18 @@ func main() {
 	// Initialize Redis queue client
 	queueClient, err := queue.NewClient(cfg.RedisAddr, cfg.RedisPassword)
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		log.Fatalf("Failed to connect to Redis (queue): %v", err)
 	}
 	defer queueClient.Close()
 
+	// Initialize scene manager (shares the same Redis)
+	sceneManager, err := scene.NewManagerFromAddr(cfg.RedisAddr, cfg.RedisPassword)
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis (scene): %v", err)
+	}
+
 	// Initialize router with all middleware, routes, and dependencies
-	router := api.NewRouter(cfg, queueClient)
+	router := api.NewRouter(cfg, queueClient, sceneManager)
 
 	// Graceful shutdown listener
 	quit := make(chan os.Signal, 1)
