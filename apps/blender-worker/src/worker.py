@@ -152,7 +152,7 @@ def store_scene_layers(
 # ─── Job Processing ─────────────────────────────────────────────────
 
 
-def process_job(client: redis.Redis, job_data: dict) -> None:
+def process_job(client: redis.Redis, job_data: dict, model_client=None) -> None:
     """Process a single job from the queue.
 
     This is the main dispatch point. Based on job_type, it delegates to
@@ -188,9 +188,9 @@ def process_job(client: redis.Redis, job_data: dict) -> None:
                 "overrides": existing_overrides if existing_overrides else None,
             }
 
-            # Run the real assembler
+            # Run the assembler with AI model client
             from src.assembler import assemble_scene
-            result = assemble_scene(assemble_data)
+            result = assemble_scene(assemble_data, model_client=model_client)
 
             # Store layers in Redis
             store_scene_layers(
@@ -200,12 +200,14 @@ def process_job(client: redis.Redis, job_data: dict) -> None:
                 result["composed_usda"],
             )
 
-            # Report success
+            # Report success with model info
             report_status(client, job_id, "completed", result={
                 "scene_id": scene_id,
                 "objects_count": result["objects_count"],
                 "base_layer_size": len(result["base_layer_usda"]),
                 "composed_size": len(result["composed_usda"]),
+                "ai_model_used": result["ai_model_used"],
+                "model_info": result["model_info"],
             })
 
         elif job_type == "render":
@@ -250,6 +252,11 @@ def main():
         logger.error("❌ Failed to connect to Redis: %s", e)
         sys.exit(1)
 
+    # Initialize AI model client
+    from src.model_client import create_client
+    model_client = create_client()
+    logger.info("🤖 Model provider: %s", getattr(model_client, 'provider_name', 'unknown'))
+
     # Poll loop
     while _running:
         try:
@@ -259,7 +266,7 @@ def main():
                 _, raw_payload = result
                 try:
                     job_data = json.loads(raw_payload)
-                    process_job(client, job_data)
+                    process_job(client, job_data, model_client=model_client)
                 except json.JSONDecodeError as e:
                     logger.error("Invalid job payload: %s", e)
         except redis.ConnectionError:

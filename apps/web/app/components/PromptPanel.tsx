@@ -65,6 +65,11 @@ export default function PromptPanel() {
   const [layerInfo, setLayerInfo] = useState<LayerInfo | null>(null);
   const [composedUsda, setComposedUsda] = useState<string | null>(null);
   const [showUsda, setShowUsda] = useState(false);
+  const [modelInfo, setModelInfo] = useState<{
+    provider?: string;
+    ai_model_used?: boolean;
+    generation_time?: number;
+  } | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sceneIdRef = useRef<string | null>(null);
@@ -127,6 +132,20 @@ export default function PromptPanel() {
         setJobStatus("failed");
       } else {
         setJobStatus("completed");
+
+        // Parse model info from job result
+        if (finalJob.result) {
+          try {
+            const resultData = JSON.parse(finalJob.result);
+            setModelInfo({
+              provider: resultData.model_info?.provider,
+              ai_model_used: resultData.ai_model_used,
+              generation_time: resultData.model_info?.generation_time,
+            });
+          } catch {
+            // Result may not be JSON
+          }
+        }
 
         // Fetch USD layer data after successful completion
         if (sceneIdRef.current) {
@@ -359,6 +378,37 @@ export default function PromptPanel() {
                 {(layerInfo.base_layer_size / 1024).toFixed(1)}KB
               </span>
             </div>
+            {/* Model Provider Badge */}
+            {modelInfo && (
+              <div
+                className="flex items-center gap-2 text-xs px-2 py-1 rounded"
+                style={{ background: "var(--bg-tertiary)" }}
+              >
+                <div
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{
+                    background: modelInfo.ai_model_used
+                      ? "var(--success)"
+                      : "var(--text-muted)",
+                  }}
+                />
+                <span
+                  className="flex-1 font-mono"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {modelInfo.ai_model_used ? "AI" : "Procedural"}
+                  {modelInfo.provider && ` (${modelInfo.provider})`}
+                </span>
+                {modelInfo.generation_time != null && (
+                  <span
+                    className="font-mono"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {modelInfo.generation_time}s
+                  </span>
+                )}
+              </div>
+            )}
             {layerInfo.override_count > 0 && (
               <div
                 className="flex items-center gap-2 text-xs px-2 py-1 rounded"

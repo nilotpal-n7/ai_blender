@@ -157,6 +157,41 @@ def get_composed_state_as_text(
     return result
 
 
+# ─── Mesh Insertion ──────────────────────────────────────────────────
+
+
+def insert_mesh_into_stage(base_usda: str, mesh_usda: str) -> str:
+    """Insert an AI-generated mesh USDA into an existing scene.
+
+    Composes the mesh layer as the strongest sublayer on top of the
+    base scene, effectively adding the mesh to the scene while
+    preserving existing geometry, lighting, and camera.
+
+    Args:
+        base_usda: USDA text of the existing scene.
+        mesh_usda: USDA text of the AI-generated mesh to insert.
+
+    Returns:
+        Composed USDA text with the mesh merged into the scene.
+    """
+    base_layer = Sdf.Layer.CreateAnonymous("base_scene")
+    base_layer.ImportFromString(base_usda)
+
+    mesh_layer = Sdf.Layer.CreateAnonymous("ai_mesh")
+    mesh_layer.ImportFromString(mesh_usda)
+
+    composed = Sdf.Layer.CreateAnonymous("merged")
+    composed.subLayerPaths.append(mesh_layer.identifier)
+    composed.subLayerPaths.append(base_layer.identifier)
+
+    stage = Usd.Stage.Open(composed)
+    flattened = stage.Flatten()
+
+    result = flattened.ExportToString()
+    logger.info("Inserted mesh into scene: result=%d chars", len(result))
+    return result
+
+
 # ─── Procedural Scene Generation ────────────────────────────────────
 
 # Keyword-to-geometry mapping for prompt parsing
