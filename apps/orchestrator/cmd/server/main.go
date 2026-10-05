@@ -33,8 +33,13 @@ func main() {
 		log.Fatalf("Failed to connect to Redis (scene): %v", err)
 	}
 
+	// Initialize WebSocket hub
+	hub := api.NewHub()
+	go hub.Run()
+	log.Println("🔌 WebSocket hub started")
+
 	// Initialize router with all middleware, routes, and dependencies
-	router := api.NewRouter(cfg, queueClient, sceneManager)
+	router := api.NewRouter(cfg, queueClient, sceneManager, hub)
 
 	// Graceful shutdown listener
 	quit := make(chan os.Signal, 1)

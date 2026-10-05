@@ -8,12 +8,12 @@ import (
 )
 
 // NewRouter creates and configures the Gin engine with all route groups.
-// It accepts a queue client and scene manager for dependency injection.
-func NewRouter(cfg *config.Config, queueClient *queue.Client, sceneManager *scene.Manager) *gin.Engine {
+// It accepts a queue client, scene manager, and WebSocket hub for dependency injection.
+func NewRouter(cfg *config.Config, queueClient *queue.Client, sceneManager *scene.Manager, hub *Hub) *gin.Engine {
 	router := gin.Default()
 
 	// Create handler with dependencies
-	h := NewHandler(queueClient, sceneManager)
+	h := NewHandler(queueClient, sceneManager, hub)
 
 	// ─── Global Middleware ──────────────────────────────────────────
 	router.Use(CORSMiddleware())
@@ -40,6 +40,9 @@ func NewRouter(cfg *config.Config, queueClient *queue.Client, sceneManager *scen
 		{
 			job.GET("/:id/status", h.JobStatus)
 		}
+
+		// WebSocket
+		v1.GET("/ws/scene/:id", h.ServeWS)
 	}
 
 	return router

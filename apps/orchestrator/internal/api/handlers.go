@@ -16,11 +16,12 @@ import (
 type Handler struct {
 	Queue  *queue.Client
 	Scenes *scene.Manager
+	Hub    *Hub
 }
 
 // NewHandler creates a new Handler with the given dependencies.
-func NewHandler(q *queue.Client, s *scene.Manager) *Handler {
-	return &Handler{Queue: q, Scenes: s}
+func NewHandler(q *queue.Client, s *scene.Manager, hub *Hub) *Handler {
+	return &Handler{Queue: q, Scenes: s, Hub: hub}
 }
 
 // ─── Health ─────────────────────────────────────────────────────────
@@ -145,6 +146,18 @@ func (h *Handler) ScenePrompt(c *gin.Context) {
 	// Update scene with latest job reference
 	_ = h.Queue.UpdateSceneLatestJob(c.Request.Context(), sceneID, jobID, "processing")
 
+	// Broadcast job status via WebSocket
+	if h.Hub != nil {
+		h.Hub.BroadcastToScene(sceneID, WSMessage{
+			Type: MsgJobStatus,
+			Payload: map[string]interface{}{
+				"job_id":   jobID,
+				"scene_id": sceneID,
+				"status":   "queued",
+			},
+		})
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{
 		"job_id":   job.ID,
 		"scene_id": sceneID,
@@ -201,6 +214,14 @@ func (h *Handler) SceneOverride(c *gin.Context) {
 	overrideCount := 0
 	if info != nil {
 		overrideCount = info.OverrideCount
+	}
+
+	// Broadcast layer change via WebSocket
+	if h.Hub != nil && info != nil {
+		h.Hub.BroadcastToScene(sceneID, WSMessage{
+			Type:    MsgLayersChanged,
+			Payload: info,
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
