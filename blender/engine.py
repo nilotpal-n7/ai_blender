@@ -53,6 +53,8 @@ BLEND = option("--blend") or ""
 TOKEN = os.environ.get("AI_BLENDER_TOKEN", "")
 ENGINE = uuid.uuid4().hex[:12]
 HEADLESS = bpy.app.background
+# A Blender without a window leaves when nobody has needed it for this long.
+IDLE_SECONDS = float(option("--idle") or 900)
 
 # The app is on this machine, so a system proxy must not get in the way.
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -472,6 +474,7 @@ def serve():
     """Takes jobs from the app until told to stop. In a window this runs on a thread."""
     done = None
     failures = 0
+    last_work = time.time()
     while True:
         try:
             reply = request("/api/engine", hello({"done": done} if done else None))
@@ -498,7 +501,13 @@ def serve():
             return
         job = reply.get("job")
         if not job:
+            if HEADLESS and time.time() - last_work > IDLE_SECONDS:
+                # The file was saved after the last reply, and the app starts a new Blender when it needs one.
+                with contextlib.suppress(Exception):
+                    request("/api/engine", hello({"bye": True}), timeout=10)
+                return
             continue
+        last_work = time.time()
         if job.get("kind") == "quit":
             if HEADLESS:
                 with contextlib.suppress(Exception):

@@ -40,7 +40,7 @@ It needs Blender installed (found automatically in its usual place, or set `BLEN
 - You type a prompt. The app starts Blender without a window and the co-pilot works in it by running Python and by looking at renders of what it made, stage by stage.
 - The web page shows the model in 3D (exported from Blender after each stage) and the latest picture Blender rendered.
 - **Open in Blender** opens the same project in a Blender window. From then on the work happens there, in front of you, and each step is one undo. The **AI Blender** tab in the 3D viewport's sidebar holds the same conversation as the web page: type in either, read in both.
-- Close Blender and the next prompt carries on without a window, from the saved file.
+- Close Blender and the next prompt carries on without a window, from the saved file. A Blender without a window leaves by itself after 15 idle minutes and comes back with the next prompt.
 
 A project is a folder in `.data/blender/<id>/`: `scene.blend` is the scene, and it is yours to open, edit and keep.
 
