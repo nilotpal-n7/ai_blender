@@ -284,6 +284,9 @@ def look(job):
     width, height = job.get("size") or (800, 600)
     views = job.get("views") or ["three-quarter"]
     shading = job.get("shading") or "clay"
+    # Either several views of one moment, or several moments of one view.
+    moments = [int(f) for f in job.get("frames") or []]
+    shots = [(views[0], f) for f in moments] if moments else [(view, job.get("frame")) for view in views]
     if views == ["camera"] and scene.camera:
         # The scene's own shot, in its own proportions.
         height = max(2, round(width * render.resolution_y / render.resolution_x / 2) * 2)
@@ -303,8 +306,6 @@ def look(job):
 
     paths = []
     try:
-        if job.get("frame") is not None:
-            scene.frame_set(int(job["frame"]))
         keep.set(render, "resolution_x", width)
         keep.set(render, "resolution_y", height)
         keep.set(render, "resolution_percentage", 100)
@@ -332,11 +333,13 @@ def look(job):
             keep.set(look_shading, "show_shadows", True)
             keep.set(look_shading, "show_object_outline", True)
 
-        for index, view in enumerate(views):
+        for index, (view, moment) in enumerate(shots):
+            if moment is not None and int(moment) != scene.frame_current:
+                scene.frame_set(int(moment))
             if view == "camera" and own_camera:
                 scene.camera = own_camera
             else:
-                if view == "camera":
+                if view == "camera" and index == 0:
                     notes.append("the scene has no camera, so this is a three-quarter view")
                 direction = Vector(VIEWS.get(view, VIEWS["three-quarter"])).normalized()
                 camera.location = center + direction * distance
@@ -356,13 +359,18 @@ def look(job):
         scene.camera = own_camera
         bpy.data.objects.remove(camera, do_unlink=True)
         bpy.data.cameras.remove(data)
-        if job.get("frame") is not None:
+        if scene.frame_current != frame:
             scene.frame_set(frame)
         for path in paths:
             with contextlib.suppress(OSError):
                 os.remove(path)
 
-    shown = ", ".join(views) if len(views) == 1 else "a grid, left to right and top to bottom: " + ", ".join(views)
+    if moments:
+        shown = "%s at %s, left to right and top to bottom" % (views[0], ", ".join("frame %d" % f for f in moments))
+    elif len(views) == 1:
+        shown = views[0]
+    else:
+        shown = "a grid, left to right and top to bottom: " + ", ".join(views)
     return {"ok": True, "output": "; ".join(["shows " + shown] + notes), "files": [job["out"]]}
 
 
@@ -443,22 +451,94 @@ def save(job):
     return {"ok": True, "output": "\n".join(notes), "files": files}
 
 
-def render_still(job):
-    render = bpy.context.scene.render
+def progress(job, text):
+    """Tells the app how a long job is going. True when the person has asked for it to stop."""
+    try:
+        reply = request("/api/engine", hello({"progress": {"job": job.get("id"), "text": text}}), timeout=10)
+        return bool(reply.get("cancel"))
+    except Exception:
+        return False
+
+
+def encode(frames, out, source):
+    """Makes an MP4 from rendered frames, in a scene of its own so the real one is left alone."""
+    temp = bpy.data.scenes.new("__ab_encode")
+    try:
+        editor = temp.sequence_editor_create()
+        strips = editor.strips if hasattr(editor, "strips") else editor.sequences
+        strip = strips.new_image("frames", frames[0], 1, 1)
+        for path in frames[1:]:
+            strip.elements.append(os.path.basename(path))
+        size = bpy.data.images.load(frames[0])
+        width, height = size.size
+        bpy.data.images.remove(size)
+        render = temp.render
+        temp.frame_start, temp.frame_end = 1, len(frames)
+        render.fps, render.fps_base = source.render.fps, source.render.fps_base
+        # H.264 wants even sides.
+        render.resolution_x, render.resolution_y, render.resolution_percentage = width - width % 2, height - height % 2, 100
+        # The frames already carry the scene's look; a second pass would change it.
+        temp.view_settings.view_transform = "Standard"
+        with contextlib.suppress(Exception):
+            temp.view_settings.look = "None"
+        if hasattr(render.image_settings, "media_type"):
+            render.image_settings.media_type = "VIDEO"
+        render.image_settings.file_format = "FFMPEG"
+        render.ffmpeg.format = "MPEG4"
+        render.ffmpeg.codec = "H264"
+        render.ffmpeg.constant_rate_factor = "HIGH"
+        render.use_file_extension = False
+        render.filepath = out
+        bpy.ops.render.render(animation=True, scene=temp.name)
+    finally:
+        bpy.data.scenes.remove(temp)
+
+
+def render_job(job):
+    scene = bpy.context.scene
+    render = scene.render
+    if not scene.camera:
+        return {"ok": False, "error": "The scene has no camera to render from. Ask the co-pilot to set one up."}
     keep = Keep()
+    frame = scene.frame_current
     keep.set(render, "filepath", job["out"])
+    keep.set(render, "use_file_extension", True)
     keep.set(render.image_settings, "media_type", "IMAGE")
     keep.set(render.image_settings, "file_format", "PNG")
+    if job.get("draft"):
+        # Half the size and few samples: a quarter of the pixels, each much cheaper.
+        keep.set(render, "resolution_percentage", max(25, render.resolution_percentage // 2))
+        if render.engine == "CYCLES":
+            keep.set(scene.cycles, "samples", min(scene.cycles.samples, 20))
+        elif hasattr(scene, "eevee"):
+            keep.set(scene.eevee, "taa_render_samples", min(scene.eevee.taa_render_samples, 16))
     try:
-        if not bpy.context.scene.camera:
-            return {"ok": False, "error": "The scene has no camera to render from. Ask the co-pilot to set one up."}
-        bpy.ops.render.render(write_still=True)
+        if not job.get("animation"):
+            bpy.ops.render.render(write_still=True)
+            return {"ok": True, "files": [job["out"]]}
+
+        # Frame by frame, so progress can be shown and the person can stop it.
+        keep.set(render, "use_persistent_data", True)
+        numbers = list(range(scene.frame_start, scene.frame_end + 1, max(1, scene.frame_step)))
+        os.makedirs(job["frames"], exist_ok=True)
+        frames = []
+        for count, number in enumerate(numbers, 1):
+            if progress(job, "Rendering frame %d of %d" % (count, len(numbers))):
+                return {"ok": False, "error": "Stopped."}
+            scene.frame_set(number)
+            render.filepath = os.path.join(job["frames"], "%04d.png" % count)
+            bpy.ops.render.render(write_still=True)
+            frames.append(render.filepath)
+        progress(job, "Putting the frames together")
+        encode(frames, job["out"], scene)
+        return {"ok": True, "output": "%d frames" % len(frames), "files": [job["out"]]}
     finally:
         keep.restore()
-    return {"ok": True, "files": [job["out"]]}
+        if scene.frame_current != frame:
+            scene.frame_set(frame)
 
 
-JOBS = {"python": run_python, "look": look, "save": save, "render": render_still}
+JOBS = {"python": run_python, "look": look, "save": save, "render": render_job}
 
 
 def execute(job):

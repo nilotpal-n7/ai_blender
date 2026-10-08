@@ -60,9 +60,9 @@ export const VIEWS = [
 
 export type JobSpec =
   | { kind: "python"; code: string }
-  | { kind: "look"; views: string[]; objects: string[]; shading: string; frame?: number; size: [number, number]; out: string }
+  | { kind: "look"; views: string[]; objects: string[]; shading: string; frame?: number; frames?: number[]; size: [number, number]; out: string }
   | { kind: "save"; glb: string }
-  | { kind: "render"; out: string }
+  | { kind: "render"; out: string; animation: boolean; draft: boolean; frames: string }
   | { kind: "quit" };
 export type Job = JobSpec & { id: string };
 
@@ -84,6 +84,8 @@ export const EngineSyncSchema = z.object({
   version: z.string().max(40),
   done: JobResultSchema.optional(),
   bye: z.boolean().optional(),
+  /** News from the middle of a long job. It is answered at once, with whether to stop. */
+  progress: z.object({ job: z.string(), text: z.string().max(200) }).optional(),
 });
 export type EngineSync = z.infer<typeof EngineSyncSchema>;
 

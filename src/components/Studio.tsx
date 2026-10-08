@@ -392,9 +392,9 @@ export default function Studio({ id, planner }: { id: string; planner: PlannerIn
   const { project } = state;
   const engine = ENGINE[state.engine];
   const modelUrl = project.model ? api(id, `/file?name=model.glb&v=${project.model}`) : null;
-  const act = async (what: "open" | "render") => {
+  const act = async (what: "open" | "render", options: { animation?: boolean; draft?: boolean } = {}) => {
     if (what === "open") setOpening(true);
-    setProblem(await post(api(id, "/action"), { do: what }));
+    setProblem(await post(api(id, "/action"), { do: what, ...options }));
     setOpening(false);
   };
 
@@ -411,9 +411,28 @@ export default function Studio({ id, planner }: { id: string; planner: PlannerIn
           <span className={cx("size-1.5 rounded-full", engine.dot)} />
           {engine.label}
         </span>
-        <button type="button" className={barButton} disabled={state.busy} onClick={() => void act("render")} title="Render the scene from its camera">
-          <Camera size={14} /> Render
-        </button>
+        <Menu
+          align="right"
+          trigger={
+            <>
+              <Camera size={14} /> Render <ChevronDown size={12} />
+            </>
+          }
+        >
+          {(close) => (
+            <fieldset disabled={state.busy} className="contents disabled:opacity-40" onClick={close}>
+              <MenuItem onSelect={() => void act("render")} hint="one frame">
+                Picture
+              </MenuItem>
+              <MenuItem onSelect={() => void act("render", { animation: true, draft: true })} hint="half size, fast">
+                Animation, draft
+              </MenuItem>
+              <MenuItem onSelect={() => void act("render", { animation: true })} hint="can take hours">
+                Animation, full quality
+              </MenuItem>
+            </fieldset>
+          )}
+        </Menu>
         {state.engine !== "ui" && (
           <button
             type="button"
@@ -434,8 +453,12 @@ export default function Studio({ id, planner }: { id: string; planner: PlannerIn
           </div>
           {view === "picture" && image && (
             <div className="absolute inset-0 grid place-items-center bg-bg p-4">
-              {/* eslint-disable-next-line @next/next/no-img-element -- a local file that changes with every look */}
-              <img src={api(id, `/file?name=${image}`)} alt="The latest picture from Blender" className="max-h-full max-w-full rounded-md object-contain" />
+              {image.endsWith(".mp4") ? (
+                <video key={image} src={api(id, `/file?name=${image}`)} controls loop autoPlay muted playsInline className="max-h-full max-w-full rounded-md" />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element -- a local file that changes with every look
+                <img src={api(id, `/file?name=${image}`)} alt="The latest picture from Blender" className="max-h-full max-w-full rounded-md object-contain" />
+              )}
             </div>
           )}
 

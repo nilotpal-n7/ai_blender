@@ -11,7 +11,7 @@ export function GET(request: Request, { params }: RouteContext<"/api/blender/[id
     if (!body) return Response.json({ error: "File not found." }, { status: 404 });
     return new Response(new Uint8Array(body), {
       headers: {
-        "Content-Type": name.endsWith(".glb") ? "model/gltf-binary" : "image/png",
+        "Content-Type": name.endsWith(".glb") ? "model/gltf-binary" : name.endsWith(".mp4") ? "video/mp4" : "image/png",
         "Cache-Control": "no-store",
       },
     });

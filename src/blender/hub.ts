@@ -39,6 +39,7 @@ const ENGINE_FRESH_MS = 10_000;
 const START_TIMEOUT_MS = 120_000;
 const JOB_TIMEOUT_MS = 10 * 60_000;
 const RENDER_TIMEOUT_MS = 60 * 60_000;
+const ANIMATION_TIMEOUT_MS = 24 * 60 * 60_000;
 
 interface Waiting {
   resolve(result: JobResult): void;
@@ -76,6 +77,8 @@ interface Runtime {
   turn: ActiveTurn | null;
   /** Work that isn't a conversation turn, such as a render. */
   task: string | null;
+  /** The person asked for that work to stop. */
+  stopTask: boolean;
   writes: Promise<unknown>;
   /** Where the engine reaches this app. */
   origin: string;
@@ -111,6 +114,7 @@ function runtime(id: string): Runtime {
       starting: null,
       turn: null,
       task: null,
+      stopTask: false,
       writes: Promise.resolve(),
       origin: "http://localhost:3000",
     };
@@ -210,10 +214,24 @@ function failJobs(rt: Runtime, message: string): void {
  * One request from an engine: it reports the job it finished, if any, and is
  * answered with the next one, or with nothing after a while so it asks again.
  */
-export async function engineSync(input: EngineSync, signal: AbortSignal): Promise<{ job?: Job; gone?: true }> {
+export async function engineSync(
+  input: EngineSync,
+  signal: AbortSignal,
+): Promise<{ job?: Job; gone?: true; cancel?: true }> {
   if (input.token !== (await engineToken())) throw new StudioError("Unknown engine.", 403);
   await current(input.project);
   const rt = runtime(input.project);
+
+  if (input.progress) {
+    // A word from the middle of a job, not a request for the next one.
+    if (rt.engine?.id === input.engine) rt.engine.seenAt = Date.now();
+    if (rt.stopTask) return { cancel: true };
+    if (rt.task && rt.task !== input.progress.text) {
+      rt.task = input.progress.text;
+      touch(rt);
+    }
+    return {};
+  }
 
   if (input.done) {
     if (rt.engine?.working === input.done.job) rt.engine.working = null;
@@ -427,7 +445,8 @@ async function runTool(
     const name = `looks/${Date.now().toString(36)}.png`;
     const out = path.join(projectDir(id), name);
     await mkdir(path.dirname(out), { recursive: true });
-    const size = parsed.data.views.length > 1 ? LOOK_SIZE.tiled : LOOK_SIZE.one;
+    const tiled = parsed.data.views.length > 1 || parsed.data.frames !== undefined;
+    const size = tiled ? LOOK_SIZE.tiled : LOOK_SIZE.one;
     const result = await job({ kind: "look", ...parsed.data, size: [...size], out });
     if (!result.ok) return fail(result.error ?? "Blender could not render the look.");
     await updateProject(id, (project) => {
@@ -558,12 +577,16 @@ export async function startTurn(
   void runTurn(id, turn, text, history, brain);
 }
 
-/** Stops the turn after the step Blender is on. What was built stays. */
+/** Stops the turn after the step Blender is on, or a render after its current frame. What was built stays. */
 export function stopTurn(id: string): void {
   const rt = runtime(id);
-  if (!rt.turn) return;
-  rt.turn.status = "Stopping";
-  rt.turn.abort.abort();
+  if (rt.turn) {
+    rt.turn.status = "Stopping";
+    rt.turn.abort.abort();
+  } else if (rt.task) {
+    rt.stopTask = true;
+    rt.task = "Stopping after this frame";
+  } else return;
   touch(rt);
 }
 
@@ -581,22 +604,37 @@ export async function removeProject(id: string): Promise<void> {
   touch(rt);
 }
 
+export interface RenderOptions {
+  /** Every frame of the scene's range, as an MP4, instead of the current frame as a picture. */
+  animation: boolean;
+  /** Half size and few samples, to see the motion without the wait. */
+  draft: boolean;
+}
+
 /** Renders the scene from its camera with its own settings. Returns at once. */
-export async function renderStill(id: string, origin: string): Promise<void> {
+export async function renderScene(id: string, origin: string, options: RenderOptions): Promise<void> {
   const rt = runtime(id);
   if (rt.turn || rt.task) throw new StudioError("Blender is busy. Try again when it has finished.", 409);
   await current(id);
   rt.origin = origin;
   rt.task = "Rendering";
+  rt.stopTask = false;
   touch(rt);
   void (async () => {
-    const name = `renders/${Date.now().toString(36)}.png`;
+    const stamp = Date.now().toString(36);
+    const name = `renders/${stamp}.${options.animation ? "mp4" : "png"}`;
     const out = path.join(projectDir(id), name);
     let error: string | undefined;
+    let frames = "";
     try {
       await mkdir(path.dirname(out), { recursive: true });
-      const result = await call(id, { kind: "render", out }, RENDER_TIMEOUT_MS);
+      const result = await call(
+        id,
+        { kind: "render", out, ...options, frames: path.join(projectDir(id), "renders", `${stamp}-frames`) },
+        options.animation ? ANIMATION_TIMEOUT_MS : RENDER_TIMEOUT_MS,
+      );
       if (!result.ok) error = result.error?.trim().split("\n").at(-1) ?? "The render failed.";
+      frames = result.output;
     } catch (err) {
       error = failureText(err);
     }
@@ -605,12 +643,13 @@ export async function renderStill(id: string, origin: string): Promise<void> {
       project.chat.push({
         id: uid(),
         role: "assistant",
-        text: error ? "" : "Rendered the scene from its camera.",
+        text: error ? "" : options.animation ? `Rendered the animation: ${frames}.` : "Rendered the scene from its camera.",
         at: Date.now(),
         error,
       });
     }).catch(() => undefined);
     rt.task = null;
+    rt.stopTask = false;
     touch(rt);
   })();
 }

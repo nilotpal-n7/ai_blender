@@ -38,7 +38,8 @@ The editor above builds scenes from its own kit of shapes. The Blender studio (t
 It needs Blender installed (found automatically in its usual place, or set `BLENDER_PATH`) and a model: an API key, or `PLANNER=bridge`.
 
 - You type a prompt. The app starts Blender without a window and the co-pilot works in it by running Python and by looking at renders of what it made, stage by stage.
-- The web page shows the model in 3D (exported from Blender after each stage) and the latest picture Blender rendered.
+- The web page shows the model in 3D (exported from Blender after each stage, playing its animation if it has one) and the latest picture Blender rendered.
+- **Render** makes a picture of the current frame, or an MP4 of the whole frame range: a draft at half size with few samples to judge the motion, or at the scene's full settings. A video is rendered frame by frame, so the page shows which frame it is on and Stop ends it after that frame.
 - **Open in Blender** opens the same project in a Blender window. From then on the work happens there, in front of you, and each step is one undo. The **AI Blender** tab in the 3D viewport's sidebar holds the same conversation as the web page: type in either, read in both.
 - Close Blender and the next prompt carries on without a window, from the saved file. A Blender without a window leaves by itself after 15 idle minutes and comes back with the next prompt.
 
@@ -165,7 +166,8 @@ In the Blender studio:
 
 - Moving an editor scene into a studio project, other than by running its exported script in Blender yourself.
 - Selecting and editing objects on the web page. The page shows the model and the conversation; hands-on editing is done in Blender.
-- Rendering an animation from the page (stills only), and procedural materials in the web preview: the preview shows what glTF can carry, the Picture tab shows the real thing.
+- Procedural materials in the web preview: the preview shows what glTF can carry, the Picture tab shows the real thing.
+- Keeping Blender usable during a render started from the page: a Blender with a window is busy until the render ends.
 - Poly Haven's 3D models, and scanned textures in the web preview: surfaces projected without a UV map show there as their overall colour.
 
 In both:

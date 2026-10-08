@@ -27,6 +27,12 @@ export const LookInput = z.strictObject({
     .default("clay")
     .describe("clay: plain grey, fast, shows form. parts: every object its own colour. render: the real materials, lights and render engine, slower."),
   frame: z.number().int().optional().describe("Look at this frame of the animation instead of the current one."),
+  frames: z
+    .array(z.number().int())
+    .min(2)
+    .max(4)
+    .optional()
+    .describe("Check motion: these frames of the first view, tiled side by side in one picture."),
 });
 
 export interface BlenderTool {

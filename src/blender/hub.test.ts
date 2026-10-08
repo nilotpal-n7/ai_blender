@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PlannerError } from "@/planner/types";
 import { blenderGuide, createBridgeBrain, type Brain, type ToolOutcome, type Turn } from "./brain";
 import { refuseOutsiders } from "./http";
-import { engineSync, engineToken, removeProject, startTurn, stopTurn, studioState, waitForChange } from "./hub";
+import { engineSync, engineToken, removeProject, renderScene, startTurn, stopTurn, studioState, waitForChange } from "./hub";
 import { createProject, listProjects, projectDir, servedFile } from "./projects";
 import type { EngineMode, Job, JobResult, StudioState } from "./types";
 
@@ -24,15 +24,19 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-/** Stands in for Blender: asks the hub for jobs and answers them. */
-function fakeEngine(project: string, mode: EngineMode = "headless") {
+/**
+ * Stands in for Blender: asks the hub for jobs and answers them. An animation is
+ * three frames; `onFrame` runs after each one has been announced.
+ */
+function fakeEngine(project: string, mode: EngineMode = "headless", onFrame?: (frame: number) => Promise<void>) {
   const abort = new AbortController();
   const jobs: Job[] = [];
   const finished = (async () => {
     const token = await engineToken();
+    const me = { project, engine: `fake-${mode}`, token, mode, version: "test" };
     let done: JobResult | undefined;
     while (!abort.signal.aborted) {
-      const reply = await engineSync({ project, engine: `fake-${mode}`, token, mode, version: "test", done }, abort.signal);
+      const reply = await engineSync({ ...me, done }, abort.signal);
       done = undefined;
       if (reply.gone) return "gone";
       const job = reply.job;
@@ -42,12 +46,24 @@ function fakeEngine(project: string, mode: EngineMode = "headless") {
       if (job.kind === "look") files.push(job.out);
       if (job.kind === "save") files.push(job.glb);
       for (const file of files) await writeFile(file, job.kind);
+      let stopped = false;
+      if (job.kind === "render" && job.animation) {
+        for (let frame = 1; frame <= 3 && !stopped; frame++) {
+          const told = await engineSync({ ...me, progress: { job: job.id, text: `Rendering frame ${frame} of 3` } }, abort.signal);
+          stopped = told.cancel === true;
+          if (!stopped) await onFrame?.(frame);
+        }
+      }
+      if (job.kind === "render" && !stopped) {
+        await writeFile(job.out, job.animation ? "mp4" : "png");
+        files.push(job.out);
+      }
       const broken = job.kind === "python" && job.code.includes("boom");
       done = {
         job: job.id,
-        ok: !broken,
-        output: job.kind === "python" ? "ran" : "shows what was asked",
-        error: broken ? "NameError: name 'boom' is not defined" : null,
+        ok: !broken && !stopped,
+        output: job.kind === "python" ? "ran" : job.kind === "render" ? "3 frames" : "shows what was asked",
+        error: broken ? "NameError: name 'boom' is not defined" : stopped ? "Stopped." : null,
         files,
         summary: { objects: [], jobs: jobs.length },
       };
@@ -172,6 +188,43 @@ describe("a turn in Blender", () => {
     expect((await settled(id)).rev).toBeGreaterThan(rev);
     // Someone already behind is answered at once.
     await waitForChange(id, rev, abort.signal);
+  });
+});
+
+describe("rendering", () => {
+  it("renders a picture or an animation and shows it on the page", async () => {
+    const { id, engine } = await ready();
+    await renderScene(id, ORIGIN, { animation: false, draft: false });
+    await expect(renderScene(id, ORIGIN, { animation: false, draft: false })).rejects.toThrow(/busy/);
+    let state = await settled(id);
+    expect(state.project.image).toMatch(/^renders\/[a-z0-9]+\.png$/);
+    expect(state.project.chat.at(-1)!.text).toMatch(/Rendered the scene/);
+
+    const seen: string[] = [];
+    engines.push(fakeEngine(id, "ui", async () => void seen.push((await studioState(id)).status)));
+    await engine.finished;
+    await renderScene(id, ORIGIN, { animation: true, draft: true });
+    state = await settled(id);
+    expect(seen).toEqual(["Rendering frame 1 of 3", "Rendering frame 2 of 3", "Rendering frame 3 of 3"]);
+    expect(state.project.image).toMatch(/^renders\/[a-z0-9]+\.mp4$/);
+    expect(state.project.chat.at(-1)!.text).toBe("Rendered the animation: 3 frames.");
+    expect(await readFile(servedFile(id, state.project.image!)!, "utf8")).toBe("mp4");
+  });
+
+  it("stops an animation after the frame it is on", async () => {
+    const project = await createProject();
+    const engine = fakeEngine(project.id, "headless", async (frame) => {
+      if (frame === 2) stopTurn(project.id);
+    });
+    await until(async () => (await studioState(project.id)).engine === "headless");
+    await renderScene(project.id, ORIGIN, { animation: true, draft: false });
+    const state = await settled(project.id);
+    expect(state.project.image).toBeNull();
+    expect(state.project.chat.at(-1)).toMatchObject({ text: "", error: "Stopped." });
+    expect(engine.jobs.at(-1)).toMatchObject({ kind: "render", animation: true, draft: false });
+    // The next render starts clean.
+    await renderScene(project.id, ORIGIN, { animation: false, draft: false });
+    expect((await settled(project.id)).project.image).toMatch(/\.png$/);
   });
 });
 

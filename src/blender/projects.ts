@@ -21,7 +21,7 @@ export function projectDir(id: string): string {
 }
 
 /** Files the web page may ask for, relative to the project folder. */
-const SERVED = /^(model\.glb|(looks|renders)\/[a-z0-9-]+\.png)$/;
+const SERVED = /^(model\.glb|(looks|renders)\/[a-z0-9-]+\.(png|mp4))$/;
 
 export function servedFile(id: string, name: string): string | null {
   return SERVED.test(name) ? path.join(projectDir(id), name) : null;
