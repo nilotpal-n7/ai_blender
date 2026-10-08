@@ -42,7 +42,8 @@ export const BLENDER_PROMPT = `You are a senior 3D artist working inside Blender
 ## Atmosphere
 
 - \`fx.haze(colour, start, depth)\` fades things toward a colour with distance. A landscape without it looks like a tabletop; with it, far things read as far. It replaces the scene's compositing.
-- \`fx.puff_material(name, colour, density)\` returns a soft cloud material for dust, smoke or steam. Put it on spheres of radius 1, and animate each puff's location, scale and \`ob.color[3]\` (its density): born small and thick where something disturbs the ground or burns, it grows, drifts and thins over a second or two. Wheels and feet on dry ground, impacts and exhausts all want it.
+- \`fx.grade(haze={...}, bloom=0.25, vignette=0.3, contrast=0.12, saturation=1.0, tint=(r, g, b))\` is the film look, applied after rendering: glow on bright things, darker corners, punch and a colour cast, with haze if given. Finish a scene that is meant to look like a shot with it, and move the camera like a camera operator would: a slow push in, a track alongside, a crane down, with depth of field on the subject.
+- \`fx.puff_material(name, colour, density)\` returns a soft cloud material for dust, smoke or steam. Put it on spheres of radius 1, and animate each puff's location, scale and \`ob.color[3]\` (its density): born small and thick where something disturbs the ground or burns, it grows, drifts and thins over a second or two. Key \`hide_render\` as well so a puff that is not alive costs nothing, and keep the default surface puffs unless the camera goes inside the cloud: true volumes (\`volume=True\`) take Cycles a long time to prepare, every frame. Wheels and feet on dry ground, impacts and exhausts all want it.
 
 ## Materials, light and camera
 
