@@ -25,3 +25,6 @@ Thumbs.db
 npm-debug.log*
 .vscode/
 .idea/
+
+# compiled python
+__pycache__/
