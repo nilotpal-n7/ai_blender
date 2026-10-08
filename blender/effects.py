@@ -195,17 +195,35 @@ class Effects:
             links.new(smoke.outputs[0], output.inputs["Volume"])
             return mat
 
-        # Seen from outside, a puff is thickest where the eye looks through its middle.
+        # Seen from outside, a puff is thickest where the eye looks through its middle and
+        # thins to nothing well before its edge. Two sizes of noise tear it into wisps, and
+        # each puff reads its own patch of that noise so no two look alike.
+        apart = nodes.new("ShaderNodeVectorMath")
+        apart.operation = "ADD"
+        spread = nodes.new("ShaderNodeCombineXYZ")
+        for socket in spread.inputs:
+            links.new(math_shift(nodes, links, own.outputs["Random"]), socket)
+        links.new(coord.outputs["Object"], apart.inputs[0])
+        links.new(spread.outputs[0], apart.inputs[1])
+        links.new(apart.outputs[0], ragged.inputs["Vector"])
+        ragged.inputs["Scale"].default_value = 1.5
+        wisps = nodes.new("ShaderNodeTexNoise")
+        wisps.inputs["Scale"].default_value = 5.5
+        wisps.inputs["Detail"].default_value = 6.0
+        wisps.inputs["Roughness"].default_value = 0.65
+        links.new(apart.outputs[0], wisps.inputs["Vector"])
+        torn = math_("MULTIPLY", cloud.outputs[0], math_("ADD", math_("MULTIPLY", wisps.outputs[0], 0.9), 0.25))
         edge = nodes.new("ShaderNodeLayerWeight")
-        edge.inputs["Blend"].default_value = 0.35
-        core = math_("POWER", math_("SUBTRACT", 1.0, edge.outputs["Facing"]), 1.6)
-        amount = math_("MULTIPLY", math_("MULTIPLY", math_("MULTIPLY", core, cloud.outputs[0]), own.outputs["Alpha"]), min(1.0, 0.85 * density))
+        edge.inputs["Blend"].default_value = 0.5
+        core = math_("POWER", math_("SUBTRACT", 1.0, edge.outputs["Facing"]), 2.4)
+        amount = math_("MULTIPLY", math_("MULTIPLY", math_("MULTIPLY", core, torn), own.outputs["Alpha"]), min(1.0, density))
         lit = nodes.new("ShaderNodeBsdfDiffuse")
         lit.inputs["Color"].default_value = (*colour, 1)
         through = nodes.new("ShaderNodeBsdfTranslucent")
         through.inputs["Color"].default_value = (*colour, 1)
         body = nodes.new("ShaderNodeMixShader")
-        body.inputs[0].default_value = 0.5
+        # Mostly light passing through, so a puff glows when the sun is behind it instead of shading like a ball.
+        body.inputs[0].default_value = 0.7
         links.new(lit.outputs[0], body.inputs[1])
         links.new(through.outputs[0], body.inputs[2])
         clear = nodes.new("ShaderNodeBsdfTransparent")
@@ -215,3 +233,100 @@ class Effects:
         links.new(body.outputs[0], puff.inputs[2])
         links.new(puff.outputs[0], output.inputs["Surface"])
         return mat
+
+    def puffs(self, events, name="Dust", material=None):
+        """
+        Makes and animates the puffs of a cloud from a list of them, so dust, smoke or
+        spray is described, not keyframed by hand. Each event is a dict:
+
+            frame   when the puff is born
+            at      (x, y, z) where
+            drift   (x, y, z) meters a second it travels, wind and rise included
+            life    frames until it has gone (default 40)
+            size    (radius at birth, radius at the end) in meters
+            alpha   how thick it gets, 0 to 1 (thin and many beats thick and few)
+            stretch (x, y, z) to flatten or lengthen it (optional)
+
+        A puff swells quickly and then slowly, and thins as it grows. Objects are reused
+        once their puff has gone and are switched off in between, so only living puffs
+        cost anything. They go in a collection called `name`, replacing what was there.
+
+        What looks real: many small puffs (two or three a frame from each wheel or foot)
+        born at the ground with alpha 0.1 to 0.3, growing from a few centimeters to a
+        few tens, drifting back and up with some randomness in every number; more of
+        them on starting, stopping and turning; and now and then a large, very faint one
+        that hangs in the air after everything else has cleared.
+        """
+        import random
+
+        scene = bpy.context.scene
+        fps = scene.render.fps
+        material = material or self.puff_material(name)
+        home = bpy.data.collections.get(name) or bpy.data.collections.new(name)
+        if home.name not in scene.collection.children:
+            scene.collection.children.link(home)
+        for old in list(home.objects):
+            bpy.data.objects.remove(old, do_unlink=True)
+        mesh = bpy.data.meshes.new(name + " puff")
+        import bmesh
+
+        ball = bmesh.new()
+        bmesh.ops.create_icosphere(ball, subdivisions=2, radius=1)
+        ball.to_mesh(mesh)
+        ball.free()
+        for poly in mesh.polygons:
+            poly.use_smooth = True
+        mesh.materials.append(material)
+
+        rng = random.Random(1)
+        pool = []  # [free from this frame on, object]
+        for event in sorted(events, key=lambda e: e["frame"]):
+            born, life = int(event["frame"]), int(event.get("life", 40))
+            free = next((entry for entry in pool if entry[0] <= born - 2), None)
+            if free is None:
+                puff = bpy.data.objects.new("%s %03d" % (name, len(pool)), mesh)
+                home.objects.link(puff)
+                puff.visible_shadow = False
+                puff.display_type = "WIRE"
+                puff.color = (1, 1, 1, 0)
+                puff.hide_render = True
+                puff.keyframe_insert("hide_render", frame=0)
+                free = [0, puff]
+                pool.append(free)
+            free[0] = born + life + 2
+            puff = free[1]
+            where, drift = _vector(event["at"]), _vector(event.get("drift", (0, 0, 0)))
+            small, large = event.get("size", (0.05, 0.4))
+            stretch = event.get("stretch", (1, 1, 1))
+            thick = event.get("alpha", 0.2)
+            puff.rotation_euler = (0, 0, rng.uniform(0, 6.28))
+            # (fraction of its life, fraction of its growth, fraction of its thickness)
+            for part, grown, dense in ((0.0, 0.0, 0.0), (0.1, 0.28, 1.0), (0.4, 0.7, 0.5), (1.0, 1.0, 0.0)):
+                frame = born + round(part * life)
+                size = small + (large - small) * grown
+                moved = drift * (part * life / fps)
+                puff.location = where + moved
+                puff.scale = (size * stretch[0], size * stretch[1], size * stretch[2])
+                puff.color = (1, 1, 1, thick * dense)
+                puff.keyframe_insert("location", frame=frame)
+                puff.keyframe_insert("scale", frame=frame)
+                puff.keyframe_insert("color", index=3, frame=frame)
+            for frame, hidden in ((born - 1, False), (born + life + 1, True)):
+                puff.hide_render = hidden
+                puff.keyframe_insert("hide_render", frame=frame)
+        return [entry[1] for entry in pool]
+
+
+def _vector(values):
+    from mathutils import Vector
+
+    return Vector(values)
+
+
+def math_shift(nodes, links, value):
+    """A puff's own random number, spread out so that each one samples a different part of the noise."""
+    node = nodes.new("ShaderNodeMath")
+    node.operation = "MULTIPLY"
+    node.inputs[1].default_value = 37.0
+    links.new(value, node.inputs[0])
+    return node.outputs[0]
