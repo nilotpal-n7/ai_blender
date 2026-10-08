@@ -272,12 +272,14 @@ class Library:
         mat["polyhaven"] = asset_id
         return mat
 
-    def painted(self, name, colour, under="rusty_metal_02", wear=0.4, dirt=0.3, scale=1.0, roughness=0.4, coat=0.0, resolution="2k", dirt_colour=(0.20, 0.15, 0.10)):
+    def painted(self, name, colour, under="rusty_metal_02", wear=0.4, dirt=0.3, scale=1.0, roughness=0.4, coat=0.0, resolution="2k", dirt_colour=(0.20, 0.15, 0.10), streaks=0.0, dust=0.0, dust_colour=(0.40, 0.31, 0.21)):
         """
         Paint over scanned metal: the paint is chipped away along edges and in patches
         (`wear`, 0 to 1), showing the scan `under` it, and dirt sits in the corners
-        (`dirt`, 0 to 1). For machines, vehicles, tools, containers. Edges and corners
-        are found by the renderer, so this needs Cycles. Returns the material.
+        (`dirt`, 0 to 1). `streaks` (0 to 1) adds dirt that has run down the upright
+        faces, and `dust` (0 to 1) a layer settled on whatever faces up. For machines,
+        vehicles, tools, containers. Edges and corners are found by the renderer, so
+        this needs Cycles. Returns the material.
         """
         mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
         mat.use_nodes = True
@@ -351,15 +353,29 @@ class Library:
         paint = mix(ramp(noise(4.0, 3.0), 0.3, 0.7), shade(0.82), shade(1.06))
         # Sun and rain take the colour out of old paint unevenly.
         paint = mix(math_("MULTIPLY", ramp(noise(0.9, 4.0), 0.4, 0.75), 0.35 * wear), paint, shade(0.55))
-        surface = mix(grime, mix(bare, paint, metal["color"]), dirt_colour)
+        # Rain carries dirt down upright faces in runs; dust settles on what faces the sky.
+        facing = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(geometry.outputs["Normal"], facing.inputs[0])
+        stretch = nodes.new("ShaderNodeMapping")
+        stretch.inputs["Scale"].default_value = (30 * scale, 30 * scale, 1.2 * scale)
+        links.new(coord.outputs["Object"], stretch.inputs["Vector"])
+        runs = nodes.new("ShaderNodeTexNoise")
+        runs.inputs["Scale"].default_value = 1.0
+        runs.inputs["Detail"].default_value = 3.0
+        links.new(stretch.outputs[0], runs.inputs["Vector"])
+        upright = math_("SUBTRACT", 1.0, math_("ABSOLUTE", facing.outputs["Z"]))
+        run = math_("MULTIPLY", math_("MULTIPLY", ramp(runs.outputs[0], 0.5, 0.72), upright), streaks)
+        grime = math_("MAXIMUM", grime, run)
+        settled = math_("MULTIPLY", math_("MULTIPLY", ramp(facing.outputs["Z"], 0.3, 0.95), ramp(noise(2.6, 5.0), 0.25, 0.7)), dust)
+        surface = mix(settled, mix(grime, mix(bare, paint, metal["color"]), dirt_colour), dust_colour)
 
         paint_rough = math_("ADD", roughness, math_("MULTIPLY", math_("SUBTRACT", metal["roughness"], 0.5), 0.3))
         rough = nodes.new("ShaderNodeMix")
         feed(rough.inputs[0], bare)
         feed(rough.inputs[2], paint_rough)
         feed(rough.inputs[3], metal["roughness"])
-        rough = math_("ADD", rough.outputs[0], math_("MULTIPLY", grime, 0.4))
-        metallic = math_("MULTIPLY", math_("MULTIPLY", bare, metal["metal"] if metal["metal"] else 0.0), math_("SUBTRACT", 1.0, grime))
+        rough = math_("ADD", rough.outputs[0], math_("MULTIPLY", math_("MAXIMUM", grime, settled), 0.4))
+        metallic = math_("MULTIPLY", math_("MULTIPLY", bare, metal["metal"] if metal["metal"] else 0.0), math_("SUBTRACT", 1.0, math_("MAXIMUM", grime, settled)))
 
         # Paint has thickness: a chip is a small step down to the metal.
         step = nodes.new("ShaderNodeBump")
