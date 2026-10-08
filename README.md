@@ -42,6 +42,8 @@ It needs Blender installed (found automatically in its usual place, or set `BLEN
 - **Open in Blender** opens the same project in a Blender window. From then on the work happens there, in front of you, and each step is one undo. The **AI Blender** tab in the 3D viewport's sidebar holds the same conversation as the web page: type in either, read in both.
 - Close Blender and the next prompt carries on without a window, from the saved file. A Blender without a window leaves by itself after 15 idle minutes and comes back with the next prompt.
 
+The co-pilot also has [Poly Haven](https://polyhaven.com)'s free CC0 library at hand: photographed surfaces (colour, roughness, metalness, relief) and HDRI skies. It searches by words, downloads what it uses once into `.data/blender/assets/`, and builds the materials and the lighting from them, including paint that is chipped through to scanned metal along edges. This is the one thing in the studio that uses the internet; without a connection it falls back to Blender's own nodes.
+
 A project is a folder in `.data/blender/<id>/`: `scene.blend` is the scene, and it is yours to open, edit and keep.
 
 Two things to know. The co-pilot's code runs in Blender with your user's rights, like any Blender script, so the studio's routes only answer requests from this computer. And the built-in editor and the studio are separate: a studio project is a .blend file, not a scene graph, so the outliner, inspector and timeline of the built-in editor don't apply to it. Edit by hand in Blender.
@@ -129,6 +131,7 @@ app/                 pages and API routes
   s/[id]             the editor
   b/[id]             the Blender studio
 blender/engine.py    runs inside Blender: does the app's jobs, adds the sidebar tab
+blender/polyhaven.py the co-pilot's asset library: scanned surfaces and HDRI skies
 src/
   blender/           the hub between app and Blender, project files, tools and prompt for Blender
   scene/             scene model, operations, undo inverses, animation sampling
@@ -163,7 +166,7 @@ In the Blender studio:
 - Moving an editor scene into a studio project, other than by running its exported script in Blender yourself.
 - Selecting and editing objects on the web page. The page shows the model and the conversation; hands-on editing is done in Blender.
 - Rendering an animation from the page (stills only), and procedural materials in the web preview: the preview shows what glTF can carry, the Picture tab shows the real thing.
-- A downloaded asset library (scanned textures, HDRIs). Materials and lighting are built from Blender's own nodes.
+- Poly Haven's 3D models, and scanned textures in the web preview: surfaces projected without a UV map show there as their overall colour.
 
 In both:
 

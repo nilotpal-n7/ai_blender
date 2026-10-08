@@ -11,6 +11,9 @@ export), does each on Blender's main thread and reports back. With a window it
 also adds an "AI Blender" tab to the 3D viewport's sidebar, showing the same
 conversation as the web page.
 
+The co-pilot's code also gets `assets` (polyhaven.py, next to this file):
+scanned surfaces and HDRI skies, downloaded on first use.
+
 Only the standard library and what ships with Blender are used.
 """
 
@@ -35,6 +38,9 @@ import bpy
 import mathutils
 from mathutils import Euler, Matrix, Quaternion, Vector
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from polyhaven import Library  # noqa: E402
+
 
 def option(name, default=None):
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
@@ -50,6 +56,8 @@ def flag(name):
 SERVER = (option("--server") or "http://localhost:3000").rstrip("/")
 PROJECT = option("--project") or ""
 BLEND = option("--blend") or ""
+# Downloaded textures and skies, shared by every project.
+ASSETS = option("--assets") or os.path.join(os.path.dirname(os.path.abspath(BLEND or __file__)), "assets")
 TOKEN = os.environ.get("AI_BLENDER_TOKEN", "")
 ENGINE = uuid.uuid4().hex[:12]
 HEADLESS = bpy.app.background
@@ -82,6 +90,7 @@ NAMESPACE = {
     "Matrix": Matrix,
     "Euler": Euler,
     "Quaternion": Quaternion,
+    "assets": Library(ASSETS),
 }
 
 OUTPUT_LIMIT = 6000
@@ -386,7 +395,11 @@ def flatten_materials():
                 continue
             for name, value in display.items():
                 socket = node.inputs.get(name)
-                if not socket or not socket.is_linked or socket.links[0].from_node.type == "TEX_IMAGE":
+                if not socket or not socket.is_linked:
+                    continue
+                source = socket.links[0].from_node
+                # A picture laid out by a UV map travels as it is. One projected from six sides can't.
+                if source.type == "TEX_IMAGE" and source.projection == "FLAT":
                     continue
                 link = socket.links[0]
                 old = tuple(socket.default_value) if name == "Base Color" else socket.default_value

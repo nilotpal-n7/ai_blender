@@ -39,7 +39,7 @@ export const BLENDER_TOOLS: BlenderTool[] = [
   {
     name: "python",
     description:
-      "Runs Python inside Blender, on the open scene. `bpy`, `bmesh`, `mathutils`, `math`, `Vector`, `Matrix`, `Euler` and `Quaternion` are already imported, and whatever you define stays defined for later calls. Returns what the code printed, or the error with the line it happened on.",
+      "Runs Python inside Blender, on the open scene. `bpy`, `bmesh`, `mathutils`, `math`, `Vector`, `Matrix`, `Euler` and `Quaternion` are already imported, `assets` is the library of scanned surfaces and HDRI skies, and whatever you define stays defined for later calls. Returns what the code printed, or the error with the line it happened on.",
     schema: PythonInput,
   },
   {

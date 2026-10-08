@@ -304,6 +304,8 @@ async function start(id: string, mode: EngineMode): Promise<void> {
     id,
     "--blend",
     blend,
+    "--assets",
+    path.join(blenderDir(), "assets"),
     ...(hasFile ? [] : ["--fresh"]),
   ];
   const env = { ...process.env, AI_BLENDER_TOKEN: await engineToken() };
