@@ -2,6 +2,8 @@
 
 Describe a 3D scene, watch it get built in the browser, then edit it by hand. Ask for a change and the co-pilot edits the scene you have, so what you moved or restyled stays the way you left it.
 
+There are two places to build. The built-in editor is a scene made of simple shapes that lives in the browser. The [Blender studio](#blender-studio) drives a real Blender, for models with real geometry and materials.
+
 ```bash
 npm install
 npm run dev
@@ -28,6 +30,21 @@ If you use Claude Code but have no API key, set `PLANNER=bridge` in `.env.local`
 In the session, ask Claude to answer scene requests. It runs `npm run bridge`, which waits for a prompt and prints it, writes its answer into `.data/bridge/<request>/reply-1.json`, and listens again. `.data/bridge/GUIDE.md`, written by the app, has the protocol and the tool schemas.
 
 This only works while that session is open and listening, and a reply takes as long as one of its turns. The chat tells you whether anyone is listening.
+
+## Blender studio
+
+The editor above builds scenes from its own kit of shapes. The Blender studio (the button in the top bar, or http://localhost:3000/b) builds in a real Blender instead, so the co-pilot has everything Blender has: booleans, bevels, subdivision, curves, modifiers, shader nodes, armatures, the render engines.
+
+It needs Blender installed (found automatically in its usual place, or set `BLENDER_PATH`) and a model: an API key, or `PLANNER=bridge`.
+
+- You type a prompt. The app starts Blender without a window and the co-pilot works in it by running Python and by looking at renders of what it made, stage by stage.
+- The web page shows the model in 3D (exported from Blender after each stage) and the latest picture Blender rendered.
+- **Open in Blender** opens the same project in a Blender window. From then on the work happens there, in front of you, and each step is one undo. The **AI Blender** tab in the 3D viewport's sidebar holds the same conversation as the web page: type in either, read in both.
+- Close Blender and the next prompt carries on without a window, from the saved file.
+
+A project is a folder in `.data/blender/<id>/`: `scene.blend` is the scene, and it is yours to open, edit and keep.
+
+Two things to know. The co-pilot's code runs in Blender with your user's rights, like any Blender script, so the studio's routes only answer requests from this computer. And the built-in editor and the studio are separate: a studio project is a .blend file, not a scene graph, so the outliner, inspector and timeline of the built-in editor don't apply to it. Edit by hand in Blender.
 
 ## How it works
 
@@ -107,14 +124,19 @@ The Blender script is checked against Blender 5.2. The rig, meshes and materials
 app/                 pages and API routes
   api/plan           POST: runs the planner, streams its events (SSE)
   api/scenes         list, create, load, save, delete, export
+  api/blender        studio projects: state, prompts, actions, files
+  api/engine         where a running Blender asks for work
   s/[id]             the editor
+  b/[id]             the Blender studio
+blender/engine.py    runs inside Blender: does the app's jobs, adds the sidebar tab
 src/
+  blender/           the hub between app and Blender, project files, tools and prompt for Blender
   scene/             scene model, operations, undo inverses, animation sampling
   planner/           tools, Claude loop, session bridge, offline planner, system prompt
   shapes/            fused surfaces, generated shapes (pine, canopy, rock), rounded boxes
   export/            Blender, USD and glTF writers
   client/            editor store, autosave, planner stream reader, camera and recording
-  components/        viewport, timeline, outliner, inspector, chat
+  components/        viewport, timeline, outliner, inspector, chat, the studio page
   server/            scene files on disk
   three/             shared geometry, the worn-finish shader
 scripts/bridge.mjs   the session's side of the bridge planner
@@ -129,10 +151,22 @@ npm run build
 
 ## Not built yet
 
+In the built-in editor (the Blender studio has all of Blender, so these limits don't apply there):
+
 - Scanned or model-generated meshes. Everything is built from the shapes above, so people and animals come out as smooth sculpted figures, not photoreal ones; there is no text-to-mesh model behind an object.
 - Cuts and holes (booleans), subdivision and sculpting. Shapes are primitives, outlines and fused blobs.
 - Image textures. Finishes are a color with roughness, metalness, wear and rust; there is no fur, bark or fabric detail, and the UV maps the Blender export makes are there for your own texturing.
 - Rendering in Blender from the app. Export the script and render there, or record the viewport.
+
+In the Blender studio:
+
+- Moving an editor scene into a studio project, other than by running its exported script in Blender yourself.
+- Selecting and editing objects on the web page. The page shows the model and the conversation; hands-on editing is done in Blender.
+- Rendering an animation from the page (stills only), and procedural materials in the web preview: the preview shows what glTF can carry, the Picture tab shows the real thing.
+- A downloaded asset library (scanned textures, HDRIs). Materials and lighting are built from Blender's own nodes.
+
+In both:
+
 - Skinning. Rigs move rigid parts; a fused body can be rigged joint by joint but its skin doesn't stretch across a bending joint.
 - A moving camera, and editing a key's easing by hand (the co-pilot can set it).
 - Accounts or simultaneous editing. It is a single-user, local app.

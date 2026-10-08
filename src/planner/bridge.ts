@@ -42,11 +42,25 @@ const KEEP_CLOSED_MS = 24 * 60 * 60 * 1000;
 const PARTIAL_WRITE_POLLS = 20;
 
 // Strict, so a misspelled key is reported instead of silently doing nothing.
-const Reply = z.strictObject({
+export const Reply = z.strictObject({
   calls: z.array(z.strictObject({ tool: z.string(), input: z.unknown() })).default([]),
   text: z.string().optional(),
   done: z.boolean().default(false),
 });
+
+export type BridgeReply = z.infer<typeof Reply>;
+
+/** One request and how its replies are handled. */
+export interface Exchange {
+  /** Goes into request.json, next to the id and the timestamps. */
+  request: Record<string, unknown>;
+  /** Instructions for whoever answers, written next to the requests. */
+  guide: { file: string; text: string };
+  /** Progress worth showing to the person waiting. */
+  status(text: string): void;
+  /** Applies one reply. What it returns goes into that reply's result file. */
+  apply(reply: BridgeReply): Promise<Record<string, unknown>>;
+}
 
 export function bridgeOptions(env: NodeJS.ProcessEnv = process.env): BridgeOptions {
   const minutes = Number(env.BRIDGE_TIMEOUT_MINUTES);
@@ -134,123 +148,140 @@ async function listenerIsFresh(dir: string): Promise<boolean> {
   return typeof beat?.at === "number" && Date.now() - beat.at < LISTENER_FRESH_MS;
 }
 
+/**
+ * Writes a request, waits for a session to answer it, and hands each reply to
+ * `exchange.apply` until one says it is done.
+ */
+export async function converse(options: BridgeOptions, exchange: Exchange, signal: AbortSignal): Promise<void> {
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const folder = path.join(options.dir, id);
+  const file = (name: string) => path.join(folder, name);
+  const write = (name: string, value: unknown) =>
+    writeFile(file(name), JSON.stringify(value, null, 1), "utf8");
+
+  await mkdir(folder, { recursive: true });
+  await prune(options.dir);
+  await writeFile(path.join(options.dir, exchange.guide.file), exchange.guide.text, "utf8");
+  const now = Date.now();
+  await write("request.json", {
+    id,
+    createdAt: now,
+    // A listener that starts late should not answer a request nobody is waiting on.
+    expiresAt: now + options.timeoutMs,
+    guide: exchange.guide.file,
+    ...exchange.request,
+  });
+
+  exchange.status(
+    (await listenerIsFresh(options.dir))
+      ? "Waiting for the Claude Code session to pick this up."
+      : "No Claude Code session is listening yet. Ask it to answer scene requests; this one will wait.",
+  );
+
+  let claimed = false;
+  let reason = "error";
+
+  /** Resolves with reply N as parsed JSON, or with why it can't be read. */
+  const nextReply = async (n: number): Promise<{ json: unknown } | { unreadable: string }> => {
+    const deadline = Date.now() + options.timeoutMs;
+    for (let badReads = 0; ; ) {
+      signal.throwIfAborted();
+      if (!claimed && (await exists(file("claimed.json")))) {
+        claimed = true;
+        exchange.status(" The session has it and is working on it.");
+      }
+      try {
+        return { json: await readJson(file(`reply-${n}.json`)) };
+      } catch (err) {
+        if (!isMissing(err) && ++badReads > PARTIAL_WRITE_POLLS) {
+          return { unreadable: `reply-${n}.json is not valid JSON: ${(err as Error).message}` };
+        }
+      }
+      if (Date.now() > deadline) {
+        reason = "timeout";
+        throw new PlannerError(
+          "No reply from the Claude Code session. It may be closed or busy. " +
+            "Ask it to answer scene requests, then send the prompt again.",
+        );
+      }
+      await sleep(options.pollMs);
+    }
+  };
+
+  try {
+    for (let n = 1; ; n++) {
+      const read = await nextReply(n);
+      const reply = "json" in read ? Reply.safeParse(read.json) : null;
+      if (!reply?.success) {
+        await write(`result-${n}.json`, {
+          reply: n,
+          error:
+            "unreadable" in read
+              ? read.unreadable
+              : `Not a valid reply:\n${z.prettifyError(reply!.error)}`,
+          closed: false,
+        });
+        continue;
+      }
+      const applied = await exchange.apply(reply.data);
+      await write(`result-${n}.json`, { reply: n, ...applied, closed: reply.data.done });
+      if (reply.data.done) {
+        reason = "done";
+        return;
+      }
+    }
+  } catch (err) {
+    if (signal.aborted) reason = "stopped";
+    throw err;
+  } finally {
+    // Tells the session, and any listener that starts later, that this request is over.
+    await write("closed.json", { reason, at: Date.now() }).catch(() => undefined);
+  }
+}
+
 export function createBridgePlanner(options: BridgeOptions = bridgeOptions()): Planner {
   return {
     name: "claude code session",
 
     async run(input, emit, signal) {
-      const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-      const folder = path.join(options.dir, id);
-      const file = (name: string) => path.join(folder, name);
-      const write = (name: string, value: unknown) =>
-        writeFile(file(name), JSON.stringify(value, null, 1), "utf8");
-
-      await mkdir(folder, { recursive: true });
-      await prune(options.dir);
-      await writeFile(path.join(options.dir, "GUIDE.md"), bridgeGuide(), "utf8");
-      const now = Date.now();
-      await write("request.json", {
-        id,
-        createdAt: now,
-        // A listener that starts late should not answer a request nobody is waiting on.
-        expiresAt: now + options.timeoutMs,
-        prompt: input.prompt,
-        selection: input.selection,
-        history: input.chat.filter((m) => m.text.trim() !== "").slice(-HISTORY_MESSAGES),
-        scene: JSON.parse(describeScene(input.scene)),
-      });
-
-      emit({
-        type: "thinking",
-        delta: (await listenerIsFresh(options.dir))
-          ? "Waiting for the Claude Code session to pick this up."
-          : "No Claude Code session is listening yet. Ask it to answer scene requests; this one will wait.",
-      });
-
       let scene: Scene = input.scene;
       let wroteText = false;
-      let claimed = false;
-      let reason = "error";
 
-      /** Resolves with reply N as parsed JSON, or with why it can't be read. */
-      const nextReply = async (n: number): Promise<{ json: unknown } | { unreadable: string }> => {
-        const deadline = Date.now() + options.timeoutMs;
-        for (let badReads = 0; ; ) {
-          signal.throwIfAborted();
-          if (!claimed && (await exists(file("claimed.json")))) {
-            claimed = true;
-            emit({ type: "thinking", delta: " The session has it and is working on it." });
-          }
-          try {
-            return { json: await readJson(file(`reply-${n}.json`)) };
-          } catch (err) {
-            if (!isMissing(err) && ++badReads > PARTIAL_WRITE_POLLS) {
-              return { unreadable: `reply-${n}.json is not valid JSON: ${(err as Error).message}` };
+      await converse(
+        options,
+        {
+          request: {
+            prompt: input.prompt,
+            selection: input.selection,
+            history: input.chat.filter((m) => m.text.trim() !== "").slice(-HISTORY_MESSAGES),
+            scene: JSON.parse(describeScene(input.scene)),
+          },
+          guide: { file: "GUIDE.md", text: bridgeGuide() },
+          status: (text) => emit({ type: "thinking", delta: text }),
+          async apply(reply) {
+            const results: { tool: string; ok: boolean; message: string }[] = [];
+            for (const call of reply.calls) {
+              signal.throwIfAborted();
+              try {
+                const outcome = runTool(scene, call.tool, call.input);
+                scene = outcome.scene;
+                emit({ type: "ops", ops: outcome.ops });
+                results.push({ tool: call.tool, ok: true, message: outcome.result });
+                if (options.stepDelayMs > 0) await sleep(options.stepDelayMs);
+              } catch (err) {
+                if (!(err instanceof ToolError)) throw err;
+                results.push({ tool: call.tool, ok: false, message: err.message });
+              }
             }
-          }
-          if (Date.now() > deadline) {
-            reason = "timeout";
-            throw new PlannerError(
-              "No reply from the Claude Code session. It may be closed or busy. " +
-                "Ask it to answer scene requests, then send the prompt again.",
-            );
-          }
-          await sleep(options.pollMs);
-        }
-      };
-
-      try {
-        for (let n = 1; ; n++) {
-          const read = await nextReply(n);
-          const reply = "json" in read ? Reply.safeParse(read.json) : null;
-          if (!reply?.success) {
-            await write(`result-${n}.json`, {
-              reply: n,
-              error:
-                "unreadable" in read
-                  ? read.unreadable
-                  : `Not a valid reply:\n${z.prettifyError(reply!.error)}`,
-              closed: false,
-            });
-            continue;
-          }
-
-          const results: { tool: string; ok: boolean; message: string }[] = [];
-          for (const call of reply.data.calls) {
-            signal.throwIfAborted();
-            try {
-              const outcome = runTool(scene, call.tool, call.input);
-              scene = outcome.scene;
-              emit({ type: "ops", ops: outcome.ops });
-              results.push({ tool: call.tool, ok: true, message: outcome.result });
-              if (options.stepDelayMs > 0) await sleep(options.stepDelayMs);
-            } catch (err) {
-              if (!(err instanceof ToolError)) throw err;
-              results.push({ tool: call.tool, ok: false, message: err.message });
+            if (reply.text) {
+              emit({ type: "text", delta: (wroteText ? "\n\n" : "") + reply.text });
+              wroteText = true;
             }
-          }
-          if (reply.data.text) {
-            emit({ type: "text", delta: (wroteText ? "\n\n" : "") + reply.data.text });
-            wroteText = true;
-          }
-          await write(`result-${n}.json`, {
-            reply: n,
-            results,
-            failed: results.filter((r) => !r.ok).length,
-            closed: reply.data.done,
-          });
-          if (reply.data.done) {
-            reason = "done";
-            return;
-          }
-        }
-      } catch (err) {
-        if (signal.aborted) reason = "stopped";
-        throw err;
-      } finally {
-        // Tells the session, and any listener that starts later, that this request is over.
-        await write("closed.json", { reason, at: Date.now() }).catch(() => undefined);
-      }
+            return { results, failed: results.filter((r) => !r.ok).length };
+          },
+        },
+        signal,
+      );
     },
   };
 }

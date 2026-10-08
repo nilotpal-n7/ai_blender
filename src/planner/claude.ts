@@ -48,7 +48,7 @@ const TOOLS: Anthropic.Beta.BetaTool[] = TOOL_SPECS.map((spec) => ({
   eager_input_streaming: true,
 }));
 
-function historyMessages(chat: PlanInput["chat"]): MessageParam[] {
+export function historyMessages(chat: PlanInput["chat"]): MessageParam[] {
   const recent = chat.filter((m) => m.text.trim() !== "").slice(-MAX_HISTORY_MESSAGES);
   // The API requires the conversation to open with a user message.
   const start = recent.findIndex((m) => m.role === "user");
@@ -56,7 +56,7 @@ function historyMessages(chat: PlanInput["chat"]): MessageParam[] {
 }
 
 /** Turns SDK failures into messages worth showing in the chat panel. */
-function explain(err: unknown): unknown {
+export function explain(err: unknown): unknown {
   if (err instanceof Anthropic.APIUserAbortError) return err;
   if (err instanceof Anthropic.AuthenticationError) {
     return new PlannerError(

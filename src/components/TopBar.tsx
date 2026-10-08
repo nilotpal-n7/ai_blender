@@ -12,6 +12,7 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { flushSave } from "@/client/autosave";
@@ -212,6 +213,13 @@ export default function TopBar() {
       </Menu>
 
       <div className="flex-1" />
+      <Link
+        href="/b"
+        title="Build in a real Blender scene instead of the built-in editor"
+        className="hidden h-7 items-center gap-1.5 rounded-md border border-accent/60 px-2.5 text-[13px] text-text transition-colors hover:bg-hover sm:flex"
+      >
+        Blender studio
+      </Link>
       <SaveBadge />
       <ExportMenu />
     </header>
