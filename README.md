@@ -49,6 +49,8 @@ Two effects ship with it and need nothing downloaded: haze, which fades a landsc
 
 A project is a folder in `.data/blender/<id>/`: `scene.blend` is the scene, and it is yours to open, edit and keep.
 
+**Rendering the film on a faster machine.** A long animation at final quality is more than most desks can render. `blender -b .data/blender/<id>/scene.blend --python blender/pack_for_cloud.py -- --out <folder> --name <name>` writes a copy of the scene with every texture and sky inside the file and the noise settings turned up (512 samples, full size, the best denoiser; the look itself is untouched), and beside it a Google Colab notebook and the script it runs. Put that folder in Google Drive, open the notebook, pick a GPU runtime and run the cells: it installs the same Blender, renders one frame so you can see it and how long the rest will take, renders every frame into Drive, and makes the MP4. Colab ends sessions when it likes; run the notebook again and it carries on from the first missing frame. Your working scene is not changed.
+
 Two things to know. The co-pilot's code runs in Blender with your user's rights, like any Blender script, so the studio's routes only answer requests from this computer. And the built-in editor and the studio are separate: a studio project is a .blend file, not a scene graph, so the outliner, inspector and timeline of the built-in editor don't apply to it. Edit by hand in Blender.
 
 ## How it works
@@ -136,6 +138,8 @@ app/                 pages and API routes
 blender/engine.py    runs inside Blender: does the app's jobs, adds the sidebar tab
 blender/polyhaven.py the co-pilot's asset library: scanned surfaces, HDRI skies, props
 blender/effects.py   haze and puffs of dust or smoke
+blender/pack_for_cloud.py  a self-contained, final-quality copy of a scene, with a Colab notebook
+blender/cloud_render.py    renders that copy on another machine, frame by frame, resumably
 src/
   blender/           the hub between app and Blender, project files, tools and prompt for Blender
   scene/             scene model, operations, undo inverses, animation sampling
