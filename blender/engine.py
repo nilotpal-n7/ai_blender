@@ -290,7 +290,7 @@ def look(job):
     if views == ["camera"] and scene.camera:
         # The scene's own shot, in its own proportions.
         height = max(2, round(width * render.resolution_y / render.resolution_x / 2) * 2)
-    center, radius, notes = framed(job.get("objects") or [])
+    notes = []
 
     keep = Keep()
     own_camera = scene.camera
@@ -300,9 +300,6 @@ def look(job):
     scene.collection.objects.link(camera)
     data.lens = 50
     vertical = 2 * math.atan(math.tan(data.angle / 2) * min(1, height / width))
-    distance = radius / math.sin(min(vertical, data.angle) / 2) * 1.04
-    data.clip_start = max(distance / 2000, 0.0005)
-    data.clip_end = distance + radius * 8
 
     paths = []
     try:
@@ -341,6 +338,12 @@ def look(job):
             else:
                 if view == "camera" and index == 0:
                     notes.append("the scene has no camera, so this is a three-quarter view")
+                # Framed afresh for each shot: in an animation the subject is somewhere else by now.
+                center, radius, found = framed(job.get("objects") or [])
+                notes += [note for note in found if note not in notes]
+                distance = radius / math.sin(min(vertical, data.angle) / 2) * 1.04
+                data.clip_start = max(distance / 2000, 0.0005)
+                data.clip_end = distance + radius * 8
                 direction = Vector(VIEWS.get(view, VIEWS["three-quarter"])).normalized()
                 camera.location = center + direction * distance
                 camera.rotation_euler = direction.to_track_quat("Z", "Y").to_euler()
