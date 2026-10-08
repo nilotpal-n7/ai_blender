@@ -33,7 +33,7 @@ function withBox(doc: SceneDoc, parent: string | null = null): SceneDoc {
         box: {
           id: "box", name: "Box", parent, kind: "mesh", primitive: "box", visible: true,
           position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
-          author: "user", pinned: [], material: { ...DEFAULT_MATERIAL }, bevel: 0, array: null,
+          author: "user", pinned: [], material: { ...DEFAULT_MATERIAL }, bevel: 0, array: null, taper: [1, 1],
         },
       },
     },

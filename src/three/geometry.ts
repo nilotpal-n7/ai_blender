@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { GENERATED, isBeveled, nodeMesh, primitiveMesh } from "@/export/meshdata";
-import type { Primitive, Vec3 } from "@/scene/types";
+import { GENERATED, nodeMesh, primitiveMesh, shapeKey, type Shaped } from "@/export/meshdata";
+import type { Primitive } from "@/scene/types";
 import type { MeshData } from "@/shapes/mesh";
 
 /** Turns plain mesh data into three.js geometry, carrying its colors along. */
@@ -72,21 +72,21 @@ export function primitiveGeometry(primitive: Primitive): THREE.BufferGeometry {
   return geometry;
 }
 
-const beveled = new Map<string, THREE.BufferGeometry>();
+const shaped = new Map<string, THREE.BufferGeometry>();
 
-/** Geometry for a mesh node: the shared unit primitive, or a box rounded for the node's size. */
-export function nodeGeometry(node: { primitive: Primitive; scale: Vec3; bevel: number }): THREE.BufferGeometry {
-  if (!isBeveled(node)) return primitiveGeometry(node.primitive);
-  const key = `${node.scale.join(",")}|${node.bevel}`;
-  let geometry = beveled.get(key);
+/** Geometry for a mesh node: the shared unit primitive, or the node's own rounded or tapered shape. */
+export function nodeGeometry(node: Shaped): THREE.BufferGeometry {
+  const key = shapeKey(node);
+  if (key === null) return primitiveGeometry(node.primitive);
+  let geometry = shaped.get(key);
   if (!geometry) {
     geometry = meshDataGeometry(nodeMesh(node));
     // Sizes change while dragging, so old entries are dropped rather than kept forever.
-    if (beveled.size > 1500) {
-      beveled.forEach((old) => old.dispose());
-      beveled.clear();
+    if (shaped.size > 1500) {
+      shaped.forEach((old) => old.dispose());
+      shaped.clear();
     }
-    beveled.set(key, geometry);
+    shaped.set(key, geometry);
   }
   return geometry;
 }

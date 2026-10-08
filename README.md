@@ -33,7 +33,9 @@ This only works while that session is open and listening, and a reply takes as l
 
 **The scene is a tree of nodes, stored as JSON.** A node is a group, a mesh or a light. A mesh is one of eleven unit-sized shapes: eight basic ones (box, sphere, cylinder, cone, pyramid, torus, plane, wedge) and three generated ones (pine needles, a leafy canopy, a rock). Things like a table are a group with meshes as parts. The conventions are fixed everywhere: Y up, meters, rotation in degrees, and shapes are unit-sized so a mesh's scale is its size.
 
-**Hard surfaces get three extras.** A box can have a `bevel`, a radius in meters that rounds its edges and corners. A mesh can have an `array`, which repeats it in a row or a ring (vent slats, bolts, fan blades). A material can have `wear`, which turns its color into paint chipped down to bare metal in patches. The wear pattern is worked out from where each point sits on the object, so it needs no textures and stays put when the object moves.
+**Hard surfaces get a few extras.** A box can have a `bevel`, a radius in meters that rounds its edges and corners. A box or cylinder can have a `taper`, which narrows its top into a trapezoid, a chamfered block or a nozzle. A mesh can have an `array`, which repeats it in a row or a ring (vent slats, bolts, fan blades).
+
+**Finishes are procedural.** A material's `wear` turns its color into old paint: chipped down to stained metal in patches, first along the object's edges, with scratches and a little relief so the paint reads as a layer. `rust` adds rough brown blooms that start at the chips and edges. Both are worked out from where each point sits on the object, in meters, so they need no textures or UVs and stay put when the object moves.
 
 **Organic things are fused, not stacked.** A group with `blend` above zero doesn't draw its solid parts one by one. They are joined into a single smooth surface, with the seams rounded over about that many meters, and each part's color carried into the result. A bear is then a ribcage, belly, limbs and skull that become one body. Small crisp details (eyes, claws) live in a separate, non-blending child. The fused mesh is rebuilt whenever a part changes, so parts stay editable.
 
@@ -83,7 +85,8 @@ blender -b --python Spider_mech.py -- --video out.mp4
 
 - **Blender script** (`.py`): rebuilds the scene with native Blender data. Run it from the Scripting workspace or with `blender --python scene.py`. It adds a collection with its own camera, and sets the world, the frame range and the compositor; it deletes nothing, so run it in an empty file. What it makes:
   - **Meshes** at their real size (scale applied), each with a **UV map** from Smart UV Project.
-  - **Materials**: Principled BSDF, plus a procedural node setup for `wear` (noise picks where the paint has chipped to metal). One material per finish, shared by every object that uses it.
+  - **Materials**: Principled BSDF, plus a procedural node setup for `wear` and `rust`: noise picks where the paint has chipped, each object tells the material where its edges are, and a bump gives the layers relief. One material per finish, shared by every object that uses it.
+  - **World**: a sky to be lit by and to reflect (lighter at the horizon, a glow around the sun), while the camera sees the plain background color like a studio backdrop. Animated scenes render with motion blur.
   - **Geometry Nodes**: each array is a modifier using one shared node group, so the count, step and turn stay editable.
   - **Rig**: anything animated becomes an armature with one bone per group, the parts parented to their bones, and the clip baked onto the bones as keyframes. Rigid parts are bone-parented, not skinned.
   - **Compositor**: bloom, saturation, contrast and vignette from the grade, and fog as distance haze from the mist pass.
@@ -125,7 +128,7 @@ npm run build
 ## Not built yet
 
 - Scanned or model-generated meshes. Everything is built from the shapes above, so people and animals come out as smooth sculpted figures, not photoreal ones; there is no text-to-mesh model behind an object.
-- Surface texture beyond wear. Materials are a color with roughness, metalness and wear; there are no image textures, and no fur, bark or fabric detail.
+- Image textures. Finishes are a color with roughness, metalness, wear and rust; there is no fur, bark or fabric detail, and the UV maps the Blender export makes are there for your own texturing.
 - Rendering in Blender from the app. Export the script and render there, or record the viewport.
 - Skinning. Rigs move rigid parts; a fused body can be rigged joint by joint but its skin doesn't stretch across a bending joint.
 - A moving camera, and editing a key's easing by hand (the co-pilot can set it).

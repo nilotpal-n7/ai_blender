@@ -25,7 +25,7 @@ import {
 } from "@/scene/types";
 import { EXPORT_DETAIL, fusedFinish, fusedMesh, isFused } from "@/shapes/blend";
 import type { MeshData } from "@/shapes/mesh";
-import { GENERATED, isBeveled, nodeMesh, primitiveMesh, vertexNormals } from "./meshdata";
+import { GENERATED, nodeMesh, primitiveMesh, shapeKey, vertexNormals } from "./meshdata";
 
 const GROUND_HALF_SIZE = 150;
 /** UsdLux lights shine down −Z; scene spot lights shine down −Y. */
@@ -80,8 +80,8 @@ function meshAttributes(mesh: MeshData, doubleSided = false, tint: Vec3 = [1, 1,
 function geometry(node: MeshNode): { type: string; lines: string[] } {
   const unit = "float3[] extent = [(-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)]";
   const { primitive } = node;
-  // A rounded box has no native shape; its mesh is written out.
-  if (isBeveled(node)) return { type: "Mesh", lines: meshAttributes(nodeMesh(node)) };
+  // A rounded or tapered shape has no native equivalent; its mesh is written out.
+  if (shapeKey(node) !== null) return { type: "Mesh", lines: meshAttributes(nodeMesh(node)) };
   switch (primitive) {
     case "box":
       return { type: "Cube", lines: ["double size = 1", unit] };

@@ -21,6 +21,7 @@ import {
   type Op,
   type Scene,
   type SceneNode,
+  type Taper,
   type Vec3,
 } from "@/scene/types";
 
@@ -51,6 +52,14 @@ const materialFields = {
       "How worn the finish is. Above 0 the color becomes paint that is chipped and scuffed in patches, " +
         "showing bare metal underneath: 0.15 lightly used, 0.4 battered. Default 0.",
     ),
+  rust: z
+    .number()
+    .min(0)
+    .max(1)
+    .describe(
+      "Rough brown rust in patches, thickest around chipped paint and edges: 0.2 a few blooms, 0.6 badly " +
+        "corroded. For steel left outdoors or neglected machinery. Default 0.",
+    ),
 };
 const NewMaterial = z.object({
   ...materialFields,
@@ -60,6 +69,7 @@ const NewMaterial = z.object({
   emissiveIntensity: materialFields.emissiveIntensity.optional(),
   opacity: materialFields.opacity.optional(),
   wear: materialFields.wear.optional(),
+  rust: materialFields.rust.optional(),
 });
 const MaterialChange = z.object(materialFields).partial();
 
@@ -79,7 +89,15 @@ const bevel = z
   .max(1)
   .describe(
     "Boxes only: rounds the edges and corners by this radius in meters. Machined and moulded parts " +
-      "almost always want a little, 0.005–0.03; leave out for razor-sharp edges.",
+      "almost always want a little, 0.004–0.012, tight like a machined edge; larger reads as soft plastic.",
+  );
+const taper = z
+  .array(z.number().min(0).max(1))
+  .length(2)
+  .describe(
+    "Boxes and cylinders only: narrows the top (+Y) face to this fraction of the bottom along x and z. " +
+      "[0.6, 1] makes a trapezoid plate, [0.7, 0.7] a truncated pyramid or a nozzle. Armour, housings and " +
+      "feet are rarely plain bricks; rotate the part to put the narrow end where it belongs.",
   );
 const array = z
   .object({
@@ -106,6 +124,7 @@ const Part = z.object({
   scale: vec3("Size of the part in meters along x, y, z."),
   material: NewMaterial,
   bevel: bevel.optional(),
+  taper: taper.optional(),
   array: array.optional(),
 });
 
@@ -133,6 +152,7 @@ const AddObject = z.object({
     ),
   blend: blend.optional(),
   bevel: bevel.optional(),
+  taper: taper.optional(),
   array: array.optional(),
 });
 
@@ -176,6 +196,7 @@ const UpdateObject = z.object({
   primitive: primitive.optional(),
   blend: blend.optional(),
   bevel: bevel.optional(),
+  taper: taper.optional(),
   array: array.nullable().optional().describe("New array for a part, or null to go back to a single copy."),
   material: MaterialChange.optional().describe("Only the material fields to change."),
   light: z.object(lightFields).partial().optional().describe("Only the light fields to change."),
@@ -276,6 +297,7 @@ function size(v: readonly number[] | undefined): Vec3 {
   return roundVec((v ?? [1, 1, 1]).map((n) => Math.max(MIN_SCALE, Math.abs(n))));
 }
 const vec = (v: readonly number[] | undefined): Vec3 => roundVec(v ?? [0, 0, 0]);
+const narrowing = (v: readonly number[] | undefined): Taper => [v?.[0] ?? 1, v?.[1] ?? 1];
 /** A single copy is no array at all. */
 function copies(input: z.infer<typeof array> | null | undefined): ArrayCopies | null {
   if (!input || input.count < 2) return null;
@@ -308,6 +330,7 @@ function addObject(input: z.infer<typeof AddObject>, scene: Scene): Planned {
       scale: input.scale ?? [1, 1, 1],
       material: input.material ?? { color: DEFAULT_MATERIAL.color },
       bevel: input.bevel,
+      taper: input.taper,
       array: input.array,
     });
     base.scale = [1, 1, 1];
@@ -321,6 +344,7 @@ function addObject(input: z.infer<typeof AddObject>, scene: Scene): Planned {
           material: { ...DEFAULT_MATERIAL, ...input.material },
           bevel: input.bevel ?? 0,
           array: copies(input.array),
+          taper: narrowing(input.taper),
         }
       : { ...base, kind: "group", blend: input.blend ?? 0 };
 
@@ -343,6 +367,7 @@ function addObject(input: z.infer<typeof AddObject>, scene: Scene): Planned {
       material: { ...DEFAULT_MATERIAL, ...part.material },
       bevel: part.bevel ?? 0,
       array: copies(part.array),
+      taper: narrowing(part.taper),
     };
   });
 
@@ -384,9 +409,10 @@ function addLight(input: z.infer<typeof AddLight>): Planned {
 }
 
 function updateObject(input: z.infer<typeof UpdateObject>): Planned {
-  const { id, position, rotation, scale, array: repeat, ...rest } = input;
+  const { id, position, rotation, scale, array: repeat, taper: narrow, ...rest } = input;
   const patch = {
     ...rest,
+    ...(narrow && { taper: narrowing(narrow) }),
     ...(repeat !== undefined && { array: copies(repeat) }),
     ...(position && { position: vec(position) }),
     ...(rotation && { rotation: vec(rotation) }),

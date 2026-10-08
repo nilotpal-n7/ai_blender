@@ -33,8 +33,8 @@ const MAX_GRID_POINTS = 2_400_000;
 /** Whether `node` is fused into its parent's surface instead of being drawn itself. */
 export function isFused(scene: Scene, node: SceneNode): boolean {
   if (node.kind !== "mesh" || node.parent === null || !node.visible) return false;
-  // Rounded boxes and arrays are hard-surface work; they keep their own edges.
-  if (node.bevel > 0 || node.array) return false;
+  // Rounded and tapered shapes and arrays are hard-surface work; they keep their own edges.
+  if (node.bevel > 0 || node.array || node.taper[0] !== 1 || node.taper[1] !== 1) return false;
   const parent = scene.nodes[node.parent];
   return parent?.kind === "group" && parent.blend > 0 && BLENDABLE.has(node.primitive);
 }

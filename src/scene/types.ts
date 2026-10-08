@@ -58,6 +58,8 @@ export const MaterialSchema = z.object({
    * color away in patches to show bare metal underneath.
    */
   wear: z.number().min(0).max(1).default(0),
+  /** How rusty the surface is: 0 is clean; higher spreads rough brown rust in patches. */
+  rust: z.number().min(0).max(1).default(0),
 });
 export type Material = z.infer<typeof MaterialSchema>;
 
@@ -116,6 +118,9 @@ export const ArraySchema = z.object({
 });
 export type ArrayCopies = z.infer<typeof ArraySchema>;
 
+export const TaperSchema = z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]);
+export type Taper = z.infer<typeof TaperSchema>;
+
 export const GroupNodeSchema = z.object({
   ...nodeBase,
   kind: z.literal("group"),
@@ -134,6 +139,11 @@ export const MeshNodeSchema = z.object({
   bevel: z.number().min(0).max(1).default(0),
   /** Repeats the mesh in a row or a ring. */
   array: ArraySchema.nullable().default(null),
+  /**
+   * Boxes and cylinders: how wide the top (+Y) face is compared with the bottom,
+   * along x and z. [1, 1] is straight; [0.5, 1] narrows the top to half along x.
+   */
+  taper: TaperSchema.default(() => [1, 1] as Taper),
 });
 export const LightNodeSchema = z.object({
   ...nodeBase,
@@ -259,6 +269,7 @@ export const NodePatchSchema = z
     blend: z.number().min(0).max(1),
     bevel: z.number().min(0).max(1),
     array: ArraySchema.nullable(),
+    taper: TaperSchema,
     pinned: nodeBase.pinned,
   })
   .partial();
@@ -353,6 +364,7 @@ export const DEFAULT_MATERIAL: Material = {
   emissiveIntensity: 0,
   opacity: 1,
   wear: 0,
+  rust: 0,
 };
 
 export const DEFAULT_LIGHT: Light = {

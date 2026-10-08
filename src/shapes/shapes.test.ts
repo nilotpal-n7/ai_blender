@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { faceNormal, primitiveMesh } from "@/export/meshdata";
+import { faceNormal, nodeMesh, primitiveMesh, shapeKey } from "@/export/meshdata";
 import { runTool } from "@/planner/tools";
 import { emptyScene, type GroupNode, type Primitive, type Vec3 } from "@/scene/types";
 import { blendMesh, fusedMesh, fusedParts, isFused, type BlendPart } from "./blend";
-import { beveledBox, roundedBoxMesh, wedgeMesh } from "./hard";
+import { beveledBox, frustumMesh, roundedBoxMesh, taperMesh, wedgeMesh } from "./hard";
 import { icosphere, type MeshData } from "./mesh";
 import { canopyMesh, pineMesh, rockMesh } from "./natural";
 
@@ -278,5 +278,58 @@ describe("hard-surface shapes", () => {
     expect(fusedParts(scene, scene.nodes.blob as GroupNode)).toHaveLength(1);
     scene = runTool(scene, "update_object", { id: "blob__plate", bevel: 0 }).scene;
     expect(isFused(scene, scene.nodes.blob__plate)).toBe(true);
+  });
+});
+
+describe("tapered shapes", () => {
+  it("narrows a box toward its top and leaves the bottom alone", () => {
+    const mesh = nodeMesh({ primitive: "box", scale: [1, 1, 1], bevel: 0, taper: [0.5, 0.25] });
+    const top = mesh.points.filter((p) => p[1] > 0);
+    const bottom = mesh.points.filter((p) => p[1] < 0);
+    expect(Math.max(...top.map((p) => p[0]))).toBeCloseTo(0.25, 9);
+    expect(Math.max(...top.map((p) => p[2]))).toBeCloseTo(0.125, 9);
+    expect(Math.max(...bottom.map((p) => p[0]))).toBeCloseTo(0.5, 9);
+    expectWatertight(mesh);
+    // A frustum of a 1 x 1 base and a 0.5 x 0.25 top.
+    expect(volume(mesh)).toBeCloseTo((1 + 0.125 + (0.25 + 0.5) / 2) / 3, 6);
+  });
+
+  it("keeps a rounded box's normals perpendicular to its tapered surface", () => {
+    const size: Vec3 = [0.6, 1, 0.6];
+    const straight = roundedBoxMesh(size, 0.02);
+    const mesh = taperMesh(straight, [0.5, 1]);
+    // A point on the flat of the +X side. Tapered, that side leans inward, so its normal tips upward.
+    const side = straight.normals!.findIndex((n) => n[0] > 0.999999);
+    const real = mesh.normals![side].map((n, a) => n / size[a]);
+    const length = Math.hypot(...real);
+    // The side runs from x = 0.3 at the bottom to 0.15 at the top over a height of 1.
+    const slope = 0.15;
+    expect(real[0] / length).toBeCloseTo(1 / Math.hypot(1, slope), 3);
+    expect(real[1] / length).toBeCloseTo(slope / Math.hypot(1, slope), 3);
+    for (const n of mesh.normals!) expect(Math.hypot(...n)).toBeCloseTo(1, 6);
+  });
+
+  it("a tapered cylinder is a frustum with a crisp rim", () => {
+    const mesh = frustumMesh([0.5, 0.5]);
+    const radiusAt = (y: number) => Math.max(...mesh.points.filter((p) => p[1] === y).map((p) => Math.hypot(p[0], p[2])));
+    expect(radiusAt(-0.5)).toBeCloseTo(0.5, 9);
+    expect(radiusAt(0.5)).toBeCloseTo(0.25, 9);
+    expect(volume(mesh)).toBeCloseTo((Math.PI * (0.25 + 0.0625 + 0.125)) / 3, 2);
+    // The rim has a side point leaning outward and a cap point facing straight up at the same place.
+    const rim = mesh.points.map((p, i) => ({ p, n: mesh.normals![i] })).filter(({ p }) => p[1] === 0.5 && Math.abs(p[2]) < 1e-9 && p[0] > 0);
+    expect(rim).toHaveLength(2);
+    expect(rim.map(({ n }) => n[1]).sort()).toEqual([expect.closeTo(0.2425, 3), 1]);
+  });
+
+  it("gives every distinct shape its own key, and plain primitives none", () => {
+    const plain = { primitive: "box" as const, scale: [1, 2, 3] as Vec3, bevel: 0, taper: [1, 1] as [number, number] };
+    expect(shapeKey(plain)).toBeNull();
+    expect(nodeMesh(plain)).toBe(primitiveMesh("box"));
+    expect(shapeKey({ ...plain, taper: [0.5, 1] })).toBe("box t0.5x1");
+    expect(shapeKey({ ...plain, bevel: 0.01, taper: [0.5, 1] })).toBe("box 1x2x3 r0.01 t0.5x1");
+    expect(shapeKey({ ...plain, primitive: "cylinder", taper: [0.5, 0.5] })).toBe("cylinder t0.5x0.5");
+    // Only boxes and cylinders taper; a sphere ignores it.
+    expect(shapeKey({ ...plain, primitive: "sphere", taper: [0.5, 0.5] })).toBeNull();
+    expect(nodeMesh({ ...plain, taper: [0.5, 1] })).toBe(nodeMesh({ ...plain, scale: [9, 9, 9], taper: [0.5, 1] }));
   });
 });

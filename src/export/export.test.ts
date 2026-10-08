@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { createOfflinePlanner } from "@/planner/offline";
 import { runTool } from "@/planner/tools";
+import { wearFit } from "@/scene/finish";
 import { eulerToQuat, lookAtQuat, quatFromTo, sunDirection } from "@/scene/math";
 import { applyOps } from "@/scene/ops";
 import { PRIMITIVES, emptyScene, type Scene, type Vec3 } from "@/scene/types";
@@ -462,5 +463,68 @@ describe("rigs, animation and arrays", () => {
     expect(usda).toMatch(/def Cube "crate_geo"/);
     // A still scene has no time codes at all.
     expect(toUsda(emptyScene())).not.toContain("TimeCode");
+  });
+});
+
+describe("worn finishes and tapered shapes in the exports", () => {
+  const scene = (() => {
+    const paint = { color: "#f04c12", wear: 0.5, rust: 0.2 };
+    const calls: [string, unknown][] = [
+      ["add_object", {
+        id: "kit", name: "Kit", position: [0, 0, 0],
+        parts: [
+          { name: "block", primitive: "box", position: [0, 0.5, 0], scale: [0.4, 1, 0.2], bevel: 0.01, taper: [0.7, 1], material: paint },
+          { name: "drum", primitive: "cylinder", position: [1, 0.5, 0], scale: [0.5, 1, 0.5], material: paint },
+          { name: "ball", primitive: "sphere", position: [2, 0.5, 0], scale: [1, 1, 1], material: paint },
+          { name: "stud", primitive: "box", position: [3, 0.1, 0], scale: [0.1, 0.1, 0.1], material: paint, array: { count: 3, step: [0.2, 0, 0] } },
+          { name: "clean", primitive: "cylinder", position: [4, 0.5, 0], scale: [0.2, 1, 0.2], taper: [0.5, 0.5], material: { color: "#888888" } },
+        ],
+      }],
+    ];
+    let s = emptyScene();
+    for (const [tool, input] of calls) s = runTool(s, tool, input).scene;
+    return s;
+  })();
+
+  it("Blender data tells the finish where each object's edges are", () => {
+    const data = blenderData(scene, "Test");
+    const byId = Object.fromEntries(data.nodes.map((n) => [n.id, n]));
+    // Half the size, in Blender's axes; a box's edges.
+    // The pattern is sized to the part: this block's middle dimension is 0.4 m, the reference size.
+    expect(byId.kit__block.finish).toEqual({ half: [0.2, 0.1, 0.5], round: 0, fit: 1 });
+    expect(byId.kit__block.material).toMatchObject({ wear: 0.5, rust: 0.2 });
+    // A cylinder's edges are its two rims.
+    expect(byId.kit__drum.finish).toEqual({ half: [0.25, 0.25, 0.5], round: 1, fit: 0.8 });
+    // A sphere has no edges, and an arrayed mesh isn't centered on its object: both out of reach.
+    expect(byId.kit__ball.finish).toEqual({ half: [1000, 1000, 1000], round: 0, fit: 0.65 });
+    // A 10 cm stud wears four times finer.
+    expect(byId.kit__stud.finish).toEqual({ half: [1000, 1000, 1000], round: 0, fit: 4 });
+    expect(wearFit([0.01, 0.01, 0.01])).toBe(12);
+    expect(wearFit([8, 3, 0.2])).toBe(0.65);
+    expect(byId.kit__clean.finish).toBeUndefined();
+    expect(Object.keys(data.meshes).sort()).toEqual(["box", "box 0.4x1x0.2 r0.01 t0.7x1", "cylinder", "cylinder t0.5x0.5", "sphere"]);
+    expect(data.meshes["cylinder t0.5x0.5"].normals).toHaveLength(data.meshes["cylinder t0.5x0.5"].verts.length);
+  });
+
+  it("Blender data describes the sky the scene is lit by", () => {
+    const { world } = blenderData(scene, "Test");
+    const [sx, sy, sz] = sunDirection(scene.environment.sun);
+    close(world.sun, [sx, -sz, sy]);
+    expect(world.horizon.every((c, i) => c > world.color[i])).toBe(true);
+    expect(world.glow[0]).toBeCloseTo(scene.environment.sun.intensity, 1);
+  });
+
+  it("the script builds the finish from that data", () => {
+    const script = toBlenderScript(scene, "Test");
+    for (const piece of ['attribute_name="ab_half"', 'obj["ab_half"] = node["finish"]["half"]', '"ShaderNodeBump"', "def make_sky(", 'outputs["Is Camera Ray"]']) {
+      expect(script).toContain(piece);
+    }
+  });
+
+  it("USD writes tapered shapes as meshes and keeps plain ones native", () => {
+    const usda = toUsda(scene);
+    expect(usda).toMatch(/def Mesh "kit__clean_geo"/);
+    expect(usda).toMatch(/def Mesh "kit__block_geo"/);
+    expect(usda).toMatch(/def Cylinder "kit__drum_geo"/);
   });
 });

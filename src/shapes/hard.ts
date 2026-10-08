@@ -6,7 +6,7 @@
  * unit space, where a node's scale stretches it back to its true dimensions.
  */
 
-import type { Vec3 } from "@/scene/types";
+import type { Taper, Vec3 } from "@/scene/types";
 import type { MeshData } from "./mesh";
 
 /** A ramp filling the unit cube: full height at the back (−Z), nothing at the front (+Z). */
@@ -90,4 +90,75 @@ export function beveledBox(size: Vec3, radius: number): MeshData {
     cache.set(key, mesh);
   }
   return mesh;
+}
+
+
+/** How much of the bottom's width is left at height `y` (−0.5 at the bottom, 0.5 at the top). */
+const widthAt = (taper: number, y: number) => 1 + (taper - 1) * (y + 0.5);
+
+/**
+ * Narrows a unit-space mesh toward its top: at the top face x is scaled by
+ * `taper[0]` and z by `taper[1]`, with a straight run in between.
+ */
+export function taperMesh(mesh: MeshData, taper: Taper): MeshData {
+  const points = mesh.points.map(
+    ([x, y, z]): Vec3 => [x * widthAt(taper[0], y), y, z * widthAt(taper[1], y)],
+  );
+  if (!mesh.normals) return { ...mesh, points };
+  // Normals follow the inverse transpose of the deformation at their point.
+  const normals = mesh.normals.map((n, i): Vec3 => {
+    const [x, y, z] = mesh.points[i];
+    const a = Math.max(widthAt(taper[0], y), 1e-3);
+    const b = Math.max(widthAt(taper[1], y), 1e-3);
+    const out = [n[0] / a, n[1] - (x * (taper[0] - 1) * n[0]) / a - (z * (taper[1] - 1) * n[2]) / b, n[2] / b];
+    const length = Math.hypot(...out) || 1;
+    return [out[0] / length, out[1] / length, out[2] / length];
+  });
+  return { ...mesh, points, normals };
+}
+
+const FRUSTUM_SEGMENTS = 40;
+
+/**
+ * A cylinder narrowed toward its top, with a crisp rim: the side and the two
+ * caps have their own points, so the side shades round and the caps flat.
+ */
+export function frustumMesh(taper: Taper): MeshData {
+  const n = FRUSTUM_SEGMENTS;
+  const points: Vec3[] = [];
+  const normals: Vec3[] = [];
+  const faces: number[][] = [];
+  const at = (i: number, y: number): Vec3 => {
+    const angle = (Math.PI * 2 * i) / n;
+    return [0.5 * widthAt(taper[0], y) * Math.cos(angle), y, -0.5 * widthAt(taper[1], y) * Math.sin(angle)];
+  };
+  // Side: one ring at the bottom, one at the top.
+  for (const y of [-0.5, 0.5]) {
+    for (let i = 0; i < n; i++) {
+      const angle = (Math.PI * 2 * i) / n;
+      const [a, b] = [Math.max(widthAt(taper[0], y), 1e-3), Math.max(widthAt(taper[1], y), 1e-3)];
+      // The straight cylinder's normal, bent by the same rule as taperMesh.
+      const flat = [Math.cos(angle), 0, -Math.sin(angle)];
+      const out = [
+        flat[0] / a,
+        -(0.5 * Math.cos(angle) * (taper[0] - 1) * flat[0]) / a - (-0.5 * Math.sin(angle) * (taper[1] - 1) * flat[2]) / b,
+        flat[2] / b,
+      ];
+      const length = Math.hypot(...out) || 1;
+      points.push(at(i, y));
+      normals.push([out[0] / length, out[1] / length, out[2] / length]);
+    }
+  }
+  for (let i = 0; i < n; i++) faces.push([i, (i + 1) % n, n + ((i + 1) % n), n + i]);
+  // Caps.
+  for (const [y, up] of [[0.5, 1], [-0.5, -1]] as const) {
+    const first = points.length;
+    for (let i = 0; i < n; i++) {
+      points.push(at(i, y));
+      normals.push([0, up, 0]);
+    }
+    const ring = Array.from({ length: n }, (_, i) => first + i);
+    faces.push(up > 0 ? ring : ring.reverse());
+  }
+  return { points, faces, smooth: true, normals };
 }

@@ -29,6 +29,7 @@ function describeNode(scene: Scene, id: string): Described {
   const out: Described = { id: node.id, name: node.name };
   if (node.kind === "mesh") out.primitive = node.primitive;
   if (node.kind === "mesh" && node.bevel > 0) out.bevel = node.bevel;
+  if (node.kind === "mesh" && (node.taper[0] !== 1 || node.taper[1] !== 1)) out.taper = node.taper;
   if (node.kind === "mesh" && node.array) {
     const { count, step, turn } = node.array;
     out.array = { count, ...(!isZero(step) && { step }), ...(!isZero(turn) && { turn }) };
@@ -42,7 +43,7 @@ function describeNode(scene: Scene, id: string): Described {
 
   if (node.kind === "mesh") {
     const material: Described = { color: node.material.color };
-    for (const key of ["roughness", "metalness", "emissive", "emissiveIntensity", "opacity", "wear"] as const) {
+    for (const key of ["roughness", "metalness", "emissive", "emissiveIntensity", "opacity", "wear", "rust"] as const) {
       if (node.material[key] !== DEFAULT_MATERIAL[key]) material[key] = node.material[key];
     }
     out.material = material;

@@ -20,18 +20,25 @@
 
 import { frameCount, sampleTrack } from "@/scene/animate";
 import {
+  EDGES,
+  RUST_BRIGHT,
+  RUST_DARK,
+  RUST_SCALE,
+  WEAR_EDGE_REACH,
   WEAR_EDGE_SCALE,
   WEAR_GRIME_SCALE,
   WEAR_METAL,
   WEAR_METAL_ROUGHNESS,
   WEAR_SCALE,
+  edgesOf,
+  wearFit,
 } from "@/scene/finish";
 import { DEG, eulerToQuat, hexToLinear, quatFromTo, round, sunDirection, type Quat } from "@/scene/math";
 import { childIds, descendantIds, pathTo } from "@/scene/ops";
 import { DEFAULT_MATERIAL, type Material, type MeshNode, type Scene, type Vec3 } from "@/scene/types";
 import { EXPORT_DETAIL, fusedFinish, fusedMesh, isFused } from "@/shapes/blend";
 import type { MeshData } from "@/shapes/mesh";
-import { GENERATED, isBeveled, nodeMesh } from "./meshdata";
+import { GENERATED, nodeMesh, shapeKey } from "./meshdata";
 
 const GROUND_HALF_SIZE = 150;
 /**
@@ -60,6 +67,7 @@ function material(m: Material, vertexColors = false) {
     emissiveIntensity: m.emissiveIntensity,
     opacity: m.opacity,
     wear: m.wear,
+    rust: m.rust,
     // The mesh carries per-point colors that the material multiplies in.
     vertexColors,
   };
@@ -98,12 +106,13 @@ export interface BlenderNode {
   /** A transform applied to the mesh's points instead of to the object. */
   bake?: { location?: number[]; rotation?: number[]; scale: number[] };
   array?: { count: number; step: number[]; turn: number[] };
+  /** For a worn or rusty mesh: half its size and whether its edges are rims, so paint can wear off them. */
+  finish?: { half: number[]; round: number; fit: number };
   light?: { type: string; color: number[]; energy: number; distance: number; spotSize: number };
 }
 
-/** Meshes are shared by key: one per primitive, and one per size of rounded box. */
-const meshKey = (node: MeshNode) =>
-  isBeveled(node) ? `box ${node.scale.join("x")} r${node.bevel}` : node.primitive;
+/** Meshes are shared by key: one per primitive, and one per rounded or tapered shape. */
+const meshKey = (node: MeshNode) => shapeKey(node) ?? node.primitive;
 
 /** The clip, sampled on every frame with the same code the viewport plays it with. */
 function animationData(scene: Scene) {
@@ -172,9 +181,21 @@ export function blenderData(scene: Scene, title: string) {
       scale: size(node.scale),
     };
     const base = { id, name: node.name, parent: node.parent, visible };
+    const edges = drawn ? edgesOf(drawn.primitive) : EDGES.none;
+    const worn = drawn !== null && (drawn.material.wear > 0 || drawn.material.rust > 0);
     const drawing = drawn && {
       mesh: meshKey(drawn),
       material: material(drawn.material, GENERATED.has(drawn.primitive)),
+      ...(worn && {
+        finish: {
+          // An arrayed mesh isn't centered on its object, and some shapes have
+          // no edges a simple rule can find: those get edges out of reach.
+          half: drawn.array || edges === EDGES.none ? [1000, 1000, 1000] : size(drawn.scale).map((v) => v / 2),
+          round: edges === EDGES.round ? 1 : 0,
+          // How much finer the wear pattern is on a part this size.
+          fit: round(wearFit(drawn.scale), 4),
+        },
+      }),
     };
 
     if (drawn?.array) {
@@ -248,7 +269,15 @@ export function blenderData(scene: Scene, title: string) {
       color: r(hexToLinear(env.sun.color)),
       strength: env.sun.intensity,
     },
-    world: { color: r(hexToLinear(env.background)), strength: env.ambient },
+    world: {
+      color: r(hexToLinear(env.background)),
+      strength: env.ambient,
+      // What the viewport's sky shows: hazier toward the horizon, with a glow around the sun.
+      horizon: r(env.fog ? hexToLinear(env.fog.color) : hexToLinear(env.background).map((c) => c + (1 - c) * 0.22)),
+      ground: r(hexToLinear(env.ground.color).map((c) => c * 0.6)),
+      sun: r([sx, -sz, sy]),
+      glow: r(hexToLinear(env.sun.color).map((c) => c * env.sun.intensity)),
+    },
     ground: env.ground.visible
       ? { halfSize: GROUND_HALF_SIZE, material: material({ ...DEFAULT_MATERIAL, color: env.ground.color, roughness: 1 }) }
       : null,
@@ -264,8 +293,12 @@ export function blenderData(scene: Scene, title: string) {
       scale: WEAR_SCALE,
       edgeScale: WEAR_EDGE_SCALE,
       grimeScale: WEAR_GRIME_SCALE,
+      edgeReach: WEAR_EDGE_REACH,
       metal: WEAR_METAL,
       metalRoughness: WEAR_METAL_ROUGHNESS,
+      rustScale: RUST_SCALE,
+      rustDark: RUST_DARK,
+      rustBright: RUST_BRIGHT,
     },
     render: { size: RENDER_SIZE },
   };
@@ -338,6 +371,21 @@ class Graph:
             self.plug(node.inputs[index], item)
         return node.outputs[0]
 
+    def vector(self, operation, a, b=None, output="Vector"):
+        node = self.node("ShaderNodeVectorMath", operation=operation)
+        self.plug(node.inputs[0], a)
+        if b is not None:
+            self.plug(node.inputs["Scale" if operation == "SCALE" else 1], b)
+        return node.outputs[output]
+
+    def lerp(self, a, b, factor):
+        """From 'a' to 'b' as 'factor' goes from 0 to 1."""
+        if not isinstance(factor, bpy.types.NodeSocket):
+            if not isinstance(a, bpy.types.NodeSocket) and not isinstance(b, bpy.types.NodeSocket):
+                return a + (b - a) * factor
+            return a if factor <= 0 else b if factor >= 1 else self.remap(factor, 0.0, 1.0, a, b)
+        return self.remap(factor, 0.0, 1.0, a, b)
+
     def mix(self, factor, a, b, blend="MIX"):
         node = self.node("ShaderNodeMix", data_type="RGBA", blend_type=blend)
         self.plug(socket(node, "Factor_Float"), factor)
@@ -347,49 +395,126 @@ class Graph:
 
 
 def add_wear(tree, shader, spec, paint):
-    """Chipped paint: noise picks where the color has worn through to bare metal."""
+    """Worn paint over metal: chips (first along edges), scratches, rust and relief, all from noise."""
     wear = DATA["wear"]
-    amount = spec["wear"]
+    amount, rusty = spec["wear"], spec["rust"]
     graph = Graph(tree)
+    plain = isinstance(paint, tuple)
 
-    # Each point's place on the object, in meters, shifted so every object chips differently.
-    coords = graph.node("ShaderNodeTexCoord")
+    # Each point's place on the object, in meters, shifted so every object wears differently.
+    coords = graph.node("ShaderNodeTexCoord").outputs["Object"]
     shift = graph.math("MULTIPLY", graph.node("ShaderNodeObjectInfo").outputs["Random"], 53.0)
     offset = graph.node("ShaderNodeCombineXYZ")
     for axis in range(3):
         graph.plug(offset.inputs[axis], shift)
-    place = graph.node("ShaderNodeVectorMath", operation="ADD")
-    graph.plug(place.inputs[0], coords.outputs["Object"])
-    graph.plug(place.inputs[1], offset.outputs[0])
+    place = graph.vector("ADD", coords, offset.outputs[0])
+    # The broad pattern is sized to the part ('ab_fit'); grain and scratches keep their own size.
+    fit = graph.node("ShaderNodeAttribute", attribute_type="OBJECT", attribute_name="ab_fit").outputs["Fac"]
+    fitted = graph.vector("ADD", graph.vector("SCALE", coords, fit), offset.outputs[0])
 
-    def noise(scale, detail):
+    def noise(scale, detail, where=None):
         node = graph.node("ShaderNodeTexNoise")
-        graph.plug(node.inputs["Vector"], place.outputs[0])
+        graph.plug(node.inputs["Vector"], fitted if where is None else where)
         node.inputs["Scale"].default_value = scale
         node.inputs["Detail"].default_value = detail
         return node.outputs[0]
 
-    # Broad patches with ragged edges.
-    field = graph.math(
-        "ADD",
-        graph.math("MULTIPLY", noise(wear["scale"], 3.0), 0.75),
-        graph.math("MULTIPLY", noise(wear["edgeScale"], 2.0), 0.25),
-    )
-    level = 0.65 - 0.22 * amount
-    chip = graph.remap(field, level, level + 0.015, 0.0, 1.0, "SMOOTHSTEP")
-    rim = graph.math("MULTIPLY", graph.remap(field, level - 0.035, level, 0.0, 1.0, "SMOOTHSTEP"), graph.math("SUBTRACT", 1.0, chip))
+    def streaks(turn, scale):
+        """Noise pulled out long and thin: fine scratches."""
+        mapping = graph.node("ShaderNodeMapping")
+        graph.plug(mapping.inputs["Vector"], place)
+        mapping.inputs["Rotation"].default_value = turn
+        mapping.inputs["Scale"].default_value = scale
+        return graph.remap(noise(1.0, 0.0, mapping.outputs[0]), 0.74, 0.8, 0.0, 1.0, "SMOOTHSTEP")
 
-    # Sun-fade and grime, uneven across the surface.
+    fine = noise(wear["edgeScale"], 2.0)
+    grain = noise(95.0, 1.0, place)
+
+    # How close this point is to an edge of its shape. The object says how big it
+    # is and whether its edges are a box's or the rims of a cylinder.
+    half = graph.node("ShaderNodeAttribute", attribute_type="OBJECT", attribute_name="ab_half").outputs["Vector"]
+    rims = graph.node("ShaderNodeAttribute", attribute_type="OBJECT", attribute_name="ab_round").outputs["Fac"]
+    inward = graph.node("ShaderNodeSeparateXYZ")
+    graph.plug(inward.inputs[0], graph.vector("SUBTRACT", half, graph.vector("ABSOLUTE", coords)))
+    here = graph.node("ShaderNodeSeparateXYZ")
+    graph.plug(here.inputs[0], coords)
+    across = graph.node("ShaderNodeCombineXYZ")
+    graph.plug(across.inputs[0], here.outputs[0])
+    graph.plug(across.inputs[1], here.outputs[1])
+    reach = graph.node("ShaderNodeSeparateXYZ")
+    graph.plug(reach.inputs[0], half)
+    to_rim = graph.math("SUBTRACT", reach.outputs[0], graph.vector("LENGTH", across.outputs[0], output="Value"))
+    da = graph.lerp(inward.outputs[0], to_rim, rims)
+    db = graph.lerp(inward.outputs[1], 1000.0, rims)
+    dc = inward.outputs[2]
+    # On the surface the smallest of the three is zero; the next one is the way to the edge.
+    lowest = graph.math("MINIMUM", da, graph.math("MINIMUM", db, dc))
+    highest = graph.math("MAXIMUM", da, graph.math("MAXIMUM", db, dc))
+    to_edge = graph.math("SUBTRACT", graph.math("SUBTRACT", graph.math("ADD", graph.math("ADD", da, db), dc), lowest), highest)
+    near_edge = graph.remap(graph.math("MULTIPLY", to_edge, fit), 0.0, wear["edgeReach"], 1.0, 0.0, "SMOOTHSTEP")
+
+    chip, rim, scratch = 0.0, 0.0, 0.0
+    if amount > 0:
+        # Broad patches with ragged outlines, and first along the edges.
+        field = graph.math(
+            "ADD",
+            graph.math("ADD", graph.math("MULTIPLY", noise(wear["scale"], 3.0), 0.72), graph.math("MULTIPLY", fine, 0.28)),
+            graph.math("MULTIPLY", near_edge, graph.math("ADD", graph.math("MULTIPLY", fine, 0.16), 0.03)),
+        )
+        level = 0.655 - 0.22 * amount
+        chip = graph.remap(field, level, level + 0.012, 0.0, 1.0, "SMOOTHSTEP")
+        rim = graph.math("MULTIPLY", graph.remap(field, level - 0.03, level, 0.0, 1.0, "SMOOTHSTEP"), graph.math("SUBTRACT", 1.0, chip))
+        depth = min(1.0, max(0.0, (amount - 0.05) / 0.35))
+        scratch = graph.math(
+            "MULTIPLY",
+            graph.math("MULTIPLY", graph.math("MAXIMUM", streaks((0.5, 0.3, 0.6), (2.5, 150.0, 150.0)), streaks((1.9, 0.8, 2.4), (3.5, 190.0, 190.0))), depth),
+            graph.math("SUBTRACT", 1.0, chip),
+        )
+
+    # The paint: faded and grimy unevenly, darker where it is about to lift.
     fade = min(1.0, amount * 1.8)
-    grime = graph.remap(noise(wear["grimeScale"], 3.0), 0.25, 0.75, 1.0 - 0.38 * fade, 1.0 + 0.24 * fade)
-    shade = graph.math("MULTIPLY", grime, graph.math("SUBTRACT", 1.0, graph.math("MULTIPLY", rim, 0.47)))
-    faded = graph.node("ShaderNodeVectorMath", operation="SCALE")
-    graph.plug(faded.inputs[0], paint if isinstance(paint, bpy.types.NodeSocket) else paint[:3])
-    graph.plug(faded.inputs["Scale"], shade)
+    shade = graph.remap(noise(wear["grimeScale"], 3.0), 0.25, 0.75, 1.0 - 0.4 * fade, 1.0 + 0.26 * fade)
+    shade = graph.math("MULTIPLY", shade, graph.math("SUBTRACT", 1.0, graph.math("MULTIPLY", rim, 0.5)))
+    shade = graph.math("MULTIPLY", shade, graph.remap(grain, 0.2, 0.8, 0.94, 1.06))
+    painted = graph.vector("SCALE", paint[:3] if plain else paint, shade)
+    # The metal under it: mottled, with darker stains.
+    bare = graph.vector("SCALE", tuple(wear["metal"]), graph.remap(noise(9.0, 2.0), 0.25, 0.75, 0.62, 1.42))
+    color = graph.mix(graph.math("MAXIMUM", chip, graph.math("MULTIPLY", scratch, 0.45)), painted, bare)
 
-    graph.plug(shader.inputs["Base Color"], graph.mix(chip, faded.outputs[0], (*wear["metal"], 1.0)))
-    graph.plug(shader.inputs["Roughness"], graph.remap(chip, 0.0, 1.0, spec["roughness"], wear["metalRoughness"]))
-    graph.plug(shader.inputs["Metallic"], graph.remap(chip, 0.0, 1.0, spec["metalness"], 1.0))
+    rust = 0.0
+    if rusty > 0:
+        # Rust blooms out of chips and edges and spreads from there.
+        bloom = graph.math("ADD", graph.math("MULTIPLY", noise(wear["rustScale"], 3.0), 0.6), graph.math("MULTIPLY", fine, 0.22))
+        for source, weight in ((chip, 0.14), (rim, 0.1), (near_edge, 0.08)):
+            bloom = graph.math("ADD", bloom, graph.math("MULTIPLY", source, weight))
+        level = 0.75 - 0.36 * rusty
+        rust = graph.remap(bloom, level, level + 0.07, 0.0, 1.0, "SMOOTHSTEP")
+        halo = graph.math("MULTIPLY", graph.remap(bloom, level - 0.1, level, 0.0, 1.0, "SMOOTHSTEP"), graph.math("SUBTRACT", 1.0, rust))
+        crust = graph.mix(graph.remap(noise(31.0, 2.0), 0.35, 0.65, 0.0, 1.0, "SMOOTHSTEP"), (*wear["rustDark"], 1.0), (*wear["rustBright"], 1.0))
+        color = graph.mix(graph.math("MULTIPLY", halo, 0.7), color, (0.78, 0.6, 0.48, 1.0), "MULTIPLY")
+        color = graph.mix(rust, color, crust)
+
+    graph.plug(shader.inputs["Base Color"], color)
+    rough = graph.lerp(
+        graph.math("MULTIPLY", graph.remap(grain, 0.2, 0.8, 0.85, 1.15), spec["roughness"]),
+        graph.remap(grain, 0.2, 0.8, wear["metalRoughness"], wear["metalRoughness"] + 0.25),
+        chip,
+    )
+    graph.plug(shader.inputs["Roughness"], graph.lerp(rough, 0.95, rust))
+    graph.plug(shader.inputs["Metallic"], graph.math("MULTIPLY", graph.lerp(spec["metalness"], 1.0, chip), graph.math("SUBTRACT", 1.0, rust)))
+
+    # Relief: paint stands proud of the metal, rust is crusty, scratches are cut in.
+    height = graph.math("MULTIPLY", grain, 0.08)
+    if amount > 0:
+        height = graph.math("ADD", height, graph.math("MULTIPLY", graph.math("SUBTRACT", 1.0, chip), 0.6))
+        height = graph.math("SUBTRACT", height, graph.math("MULTIPLY", scratch, 0.35))
+    if rusty > 0:
+        height = graph.math("ADD", height, graph.math("MULTIPLY", rust, graph.math("ADD", graph.math("MULTIPLY", fine, 0.9), 0.3)))
+    bump = graph.node("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.6
+    bump.inputs["Distance"].default_value = 0.0015
+    graph.plug(bump.inputs["Height"], height)
+    graph.plug(shader.inputs["Normal"], bump.outputs[0])
 
 
 def make_material(name, spec):
@@ -416,7 +541,7 @@ def make_material(name, spec):
         tree.links.new(colors.outputs["Color"], tint.inputs[0])
         tree.links.new(tint.outputs["Vector"], shader.inputs["Base Color"])
         paint = tint.outputs["Vector"]
-    if shader is not None and spec["wear"] > 0:
+    if shader is not None and (spec["wear"] > 0 or spec["rust"] > 0):
         attempt("the worn finish of " + name, add_wear, material.node_tree, shader, spec, paint)
     material.diffuse_color = (*spec["color"], spec["opacity"])
     if spec["opacity"] < 1.0:
@@ -686,6 +811,27 @@ def unwrap(objects):
     return len(targets)
 
 
+def make_sky(tree, background):
+    """
+    A sky to be lit by and to reflect: the chosen color overhead, hazier at the
+    horizon, darker below it, with a soft glow around the sun. The camera still
+    sees the plain color, like a studio backdrop.
+    """
+    spec = DATA["world"]
+    graph = Graph(tree)
+    direction = graph.node("ShaderNodeTexCoord").outputs["Generated"]
+    up = graph.node("ShaderNodeSeparateXYZ")
+    graph.plug(up.inputs[0], direction)
+    height = graph.math("POWER", graph.remap(up.outputs[2], 0.0, 1.0, 0.0, 1.0), 0.45)
+    sky = graph.mix(height, (*spec["horizon"], 1.0), (*spec["color"], 1.0))
+    sky = graph.mix(graph.remap(up.outputs[2], -0.25, 0.0, 0.0, 1.0, "SMOOTHSTEP"), (*spec["ground"], 1.0), sky)
+    toward = graph.vector("DOT_PRODUCT", direction, tuple(spec["sun"]), output="Value")
+    glow = graph.vector("SCALE", tuple(spec["glow"]), graph.remap(toward, 0.82, 0.985, 0.0, 0.5, "SMOOTHSTEP"))
+    lit = graph.vector("ADD", sky, glow)
+    seen = graph.mix(graph.node("ShaderNodeLightPath").outputs["Is Camera Ray"], lit, (*spec["color"], 1.0))
+    graph.plug(background.inputs["Color"], seen)
+
+
 def make_camera(collection):
     spec = DATA["camera"]
     data = bpy.data.cameras.new("Camera")
@@ -785,6 +931,10 @@ def render_settings():
     if hasattr(scene, "cycles"):
         scene.cycles.samples = 96
         scene.cycles.use_denoising = True
+    if DATA["animation"] is not None:
+        # Moving parts smear a little, as they would in front of a real camera.
+        scene.render.use_motion_blur = True
+        scene.render.motion_blur_shutter = 0.3
     if hasattr(getattr(scene, "eevee", None), "use_raytracing"):
         # Bounced light and contact shadows in EEVEE.
         scene.eevee.use_raytracing = True
@@ -875,6 +1025,11 @@ def build():
         if data is None:
             obj.empty_display_type = "PLAIN_AXES"
             obj.empty_display_size = 0.25
+        if "finish" in node:
+            # Read by the material, to wear the paint off this object's edges.
+            obj["ab_half"] = node["finish"]["half"]
+            obj["ab_round"] = float(node["finish"]["round"])
+            obj["ab_fit"] = float(node["finish"]["fit"])
         collection.objects.link(obj)
         if node["id"] in bones:
             # The fused surface of a rigged group rides on that group's own bone.
@@ -895,8 +1050,8 @@ def build():
     sun = bpy.data.lights.new("Sun", "SUN")
     sun.color = sun_spec["color"]
     sun.energy = sun_spec["strength"]
-    # A sun a few degrees wide, for shadows with soft edges.
-    sun.angle = math.radians(3.0)
+    # A sun several degrees wide, for shadows with soft edges.
+    sun.angle = math.radians(6.0)
     sun_object = bpy.data.objects.new("Sun", sun)
     collection.objects.link(sun_object)
     place(sun_object, {"location": (0.0, 0.0, 20.0), "rotation": sun_spec["rotation"], "scale": (1.0, 1.0, 1.0)})
@@ -918,6 +1073,7 @@ def build():
     if background is not None:
         background.inputs["Color"].default_value = (*DATA["world"]["color"], 1.0)
         background.inputs["Strength"].default_value = DATA["world"]["strength"]
+        attempt("the sky", make_sky, world.node_tree, background)
 
     make_camera(collection)
     render_settings()

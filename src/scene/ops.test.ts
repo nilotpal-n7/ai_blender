@@ -38,6 +38,7 @@ const mesh = (id: string, parent: string | null = null): SceneNode => ({
   material: { ...DEFAULT_MATERIAL },
   bevel: 0,
   array: null,
+  taper: [1, 1],
 });
 const add = (node: SceneNode): Op => ({ type: "add", node });
 

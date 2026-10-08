@@ -214,3 +214,25 @@ describe("animation tools", () => {
     expect(scene.environment.grade).toEqual({ bloom: 0.75, vignette: 0.3, saturation: 1, contrast: 0 });
   });
 });
+
+describe("taper and rust", () => {
+  it("pass through add_object and update_object", () => {
+    let scene = runTool(emptyScene(), "add_object", {
+      id: "armor",
+      name: "Armor",
+      position: [0, 1, 0],
+      parts: [
+        { name: "plate", primitive: "box", position: [0, 0, 0], scale: [1, 1, 0.1], taper: [0.6, 1], material: { ...red, wear: 0.4, rust: 0.2 } },
+        { name: "nozzle", primitive: "cylinder", position: [0, 1, 0], scale: [0.2, 0.3, 0.2], taper: [0.7, 0.7], material: red },
+        { name: "brick", primitive: "box", position: [0, 2, 0], scale: [1, 1, 1], material: red },
+      ],
+    }).scene;
+    expect(scene.nodes.armor__plate).toMatchObject({ taper: [0.6, 1], material: { wear: 0.4, rust: 0.2 } });
+    expect(scene.nodes.armor__nozzle).toMatchObject({ taper: [0.7, 0.7], material: { rust: 0 } });
+    expect(scene.nodes.armor__brick).toMatchObject({ taper: [1, 1] });
+    scene = runTool(scene, "update_object", { id: "armor__brick", taper: [0.5, 0.5], material: { rust: 0.6 } }).scene;
+    expect(scene.nodes.armor__brick).toMatchObject({ taper: [0.5, 0.5], material: { rust: 0.6 } });
+    expect(() => runTool(scene, "update_object", { id: "armor", taper: [0.5, 0.5] })).toThrow(/only meshes/);
+    expect(() => runTool(scene, "update_object", { id: "armor__brick", taper: [1.5, 1] })).toThrow(ToolError);
+  });
+});

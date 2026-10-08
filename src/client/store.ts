@@ -257,6 +257,7 @@ export const useEditor = create<EditorState>()((set, get) => {
           material: { ...DEFAULT_MATERIAL },
           bevel: 0,
           array: null,
+          taper: [1, 1],
         },
         `Add ${primitive}`,
       );

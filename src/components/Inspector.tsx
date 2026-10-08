@@ -142,6 +142,25 @@ function NodeInspector({ node }: { node: SceneNode }) {
               />
             </Row>
           )}
+          {(node.primitive === "box" || node.primitive === "cylinder") && (
+            <Row label="Taper">
+              <div className="grid grid-cols-2 gap-1">
+                {(["X", "Z"] as const).map((axis, i) => (
+                  <NumberField
+                    key={axis}
+                    label={`Width of the top along ${axis}, as a fraction of the bottom`}
+                    value={node.taper[i]}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onChange={(n) =>
+                      update({ taper: i === 0 ? [n, node.taper[1]] : [node.taper[0], n] }, "taper")
+                    }
+                  />
+                ))}
+              </div>
+            </Row>
+          )}
           <Row label="Color">
             <ColorField
               label="Color"
@@ -154,6 +173,13 @@ function NodeInspector({ node }: { node: SceneNode }) {
               label="Chipped, worn paint"
               value={node.material.wear}
               onChange={(wear) => update({ material: { wear } }, "wear")}
+            />
+          </Row>
+          <Row label="Rust">
+            <Slider
+              label="Rust"
+              value={node.material.rust}
+              onChange={(rust) => update({ material: { rust } }, "rust")}
             />
           </Row>
           <Row label="Roughness">

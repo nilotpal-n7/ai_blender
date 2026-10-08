@@ -18,6 +18,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useEditor } from "@/client/store";
 import { sampleTrack } from "@/scene/animate";
 import { arrayCopies } from "@/scene/array";
+import { edgesOf } from "@/scene/finish";
 import { DEG, roundVec, sunDirection } from "@/scene/math";
 import { childIds } from "@/scene/ops";
 import type { Animatable, Environment as SceneEnvironment, GroupNode, LightNode, MeshNode, Vec3 } from "@/scene/types";
@@ -65,8 +66,14 @@ function MeshBody({ node, lit }: { node: MeshNode; lit: boolean }) {
   return (
     <mesh castShadow receiveShadow onClick={onPick(node.id)}>
       <primitive object={nodeGeometry(node)} attach="geometry" />
-      {material.wear > 0 ? (
-        <Worn {...surface} wear={material.wear} seed={wearSeed(node.id)} />
+      {material.wear > 0 || material.rust > 0 ? (
+        <Worn
+          {...surface}
+          wear={material.wear}
+          rust={material.rust}
+          seed={wearSeed(node.id)}
+          edges={edgesOf(node.primitive)}
+        />
       ) : (
         <meshStandardMaterial {...surface} />
       )}
