@@ -10,6 +10,10 @@
  *       Waits for the app to apply that reply and prints what happened.
  *       --scene also prints the scene as it is afterwards.
  *
+ *   node scripts/bridge.mjs reply <request id> <reply number> [py:<file>] [look:<json>] [--text "…"] [--done]
+ *       Writes a reply to a Blender request from Python files, so the code
+ *       needn't be escaped into JSON by hand. Calls run in the order given.
+ *
  * How to answer a request is described in .data/bridge/GUIDE.md, or in
  * GUIDE-blender.md for a request whose kind is "blender".
  */
@@ -118,15 +122,36 @@ async function result(id, number, waitSeconds, withScene) {
   process.exitCode = 1;
 }
 
+async function reply(id, number, parts) {
+  const calls = [];
+  let text;
+  let done = false;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part === "--done") done = true;
+    else if (part === "--text") text = parts[++i];
+    else if (part.startsWith("py:")) calls.push({ tool: "python", input: { code: await readFile(part.slice(3), "utf8") } });
+    else if (part.startsWith("look:")) calls.push({ tool: "look", input: JSON.parse(part.slice(5) || "{}") });
+    else throw new Error(`Don't know what to do with "${part}".`);
+  }
+  const body = { calls, ...(text ? { text } : {}), done };
+  await writeFile(path.join(bridge, id, `reply-${number}.json`), JSON.stringify(body));
+  console.log(`wrote reply ${number}: ${calls.length} calls${done ? ", done" : ""}`);
+}
+
 const [command, ...args] = process.argv.slice(2);
 const option = (name, fallback) => (args.includes(name) ? Number(args[args.indexOf(name) + 1]) : fallback);
 if (command === "listen") {
   await listen(option("--timeout", 2 * 60 * 60));
+} else if (command === "reply" && args.length >= 2) {
+  await reply(args[0], args[1], args.slice(2));
 } else if (command === "result" && args.length >= 2) {
   await result(args[0], args[1], option("--wait", 60), args.includes("--scene"));
 } else {
   console.error(
-    "usage: bridge.mjs listen [--timeout <seconds>] | bridge.mjs result <request id> <reply number> [--wait <seconds>] [--scene]",
+    "usage: bridge.mjs listen [--timeout <seconds>]\n" +
+      "       bridge.mjs result <request id> <reply number> [--wait <seconds>] [--scene]\n" +
+      '       bridge.mjs reply <request id> <reply number> [py:<file>] [look:<json>] [--text "…"] [--done]',
   );
   process.exitCode = 2;
 }

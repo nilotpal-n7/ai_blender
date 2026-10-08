@@ -64,7 +64,7 @@ A request whose \`kind\` is "blender" comes from a project whose scene lives in 
 
 1. \`node scripts/bridge.mjs listen\` waits for a prompt, prints the request, and exits.
 2. Answer by writing \`reply-1.json\` into the request's folder.
-3. \`node scripts/bridge.mjs result <request id> 1\` prints what each call did: what the code printed, any error, and the path of each picture a \`look\` made. Open the pictures and judge them.
+3. \`node scripts/bridge.mjs result <request id> 1 --wait 600\` prints what each call did: what the code printed, any error, and the path of each picture a \`look\` made. Open the pictures and judge them.
 4. Continue with \`reply-2.json\`, and so on. The request ends with the first reply that has \`"done": true\`.
 
 ## A reply
@@ -78,6 +78,13 @@ A request whose \`kind\` is "blender" comes from a project whose scene lives in 
   "text": "One or two plain sentences for the person.",
   "done": false
 }
+\`\`\`
+
+Python inside JSON is tedious to escape. Write the code to a file and let the script build the reply:
+
+\`\`\`bash
+node scripts/bridge.mjs reply <request id> 1 py:stage1.py 'look:{"views":["three-quarter","front"]}'
+node scripts/bridge.mjs reply <request id> 2 --text "What was built." --done
 \`\`\`
 
 - \`calls\` run in order. A call that fails doesn't stop the others; the result says why.
