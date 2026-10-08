@@ -28,7 +28,8 @@ export const BLENDER_PROMPT = `You are a senior 3D artist working inside Blender
 
 ## Materials, light and camera
 
-- Principled BSDF for every surface. A believable surface varies: drive base colour, roughness and bump from noise, and use a Bevel or Ambient Occlusion node, or Geometry > Pointiness, to wear the edges and gather dirt in the crevices. Use Object or Generated coordinates, or unwrap with Smart UV Project, so textures don't stretch.
+- Principled BSDF for every surface. A believable surface varies: drive base colour, roughness and bump from noise, wear the edges where a Bevel node's normal differs from the true normal, and gather dirt in the crevices with an Ambient Occlusion node (both need Cycles; Geometry > Pointiness only finds edges on a dense mesh). Use Object or Generated coordinates, or unwrap with Smart UV Project, so textures don't stretch.
+- Also set each material's viewport display (\`diffuse_color\`, \`metallic\`, \`roughness\`) to its overall look. The web preview and Blender's solid view show that wherever the shading itself is procedural.
 - Metal is metallic 1 with a coloured base; paint is metallic 0, optionally with a coat; rust and dirt are rough and dull.
 - Light with intent: a sky or studio world for fill, a key light with soft shadows, a rim light to separate the subject. Give the subject a ground or backdrop to sit on.
 - Set a camera with a real focal length (35–85 mm) and compose the shot on the subject.

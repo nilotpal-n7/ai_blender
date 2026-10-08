@@ -369,6 +369,39 @@ def save_blend():
     return None
 
 
+def flatten_materials():
+    """
+    glTF carries plain values and image textures, not node networks: a surface
+    whose colour comes from procedural nodes would arrive white. For the export
+    only, such inputs are set to the material's viewport display values.
+    Returns the function that puts everything back.
+    """
+    undone = []
+    for mat in bpy.data.materials:
+        if not mat.node_tree:
+            continue
+        display = {"Base Color": tuple(mat.diffuse_color), "Metallic": mat.metallic, "Roughness": mat.roughness}
+        for node in mat.node_tree.nodes:
+            if node.type != "BSDF_PRINCIPLED":
+                continue
+            for name, value in display.items():
+                socket = node.inputs.get(name)
+                if not socket or not socket.is_linked or socket.links[0].from_node.type == "TEX_IMAGE":
+                    continue
+                link = socket.links[0]
+                old = tuple(socket.default_value) if name == "Base Color" else socket.default_value
+                undone.append((mat.node_tree, link.from_socket, socket, old))
+                mat.node_tree.links.remove(link)
+                socket.default_value = value
+
+    def restore():
+        for tree, source, socket, old in undone:
+            socket.default_value = old
+            tree.links.new(source, socket)
+
+    return restore
+
+
 def save(job):
     notes = []
     files = []
@@ -379,6 +412,7 @@ def save(job):
     except Exception as err:
         notes.append("Could not save the project file: %s" % err)
     if job.get("glb"):
+        restore = flatten_materials()
         try:
             bpy.ops.export_scene.gltf(
                 filepath=job["glb"],
@@ -391,6 +425,8 @@ def save(job):
             files.append(job["glb"])
         except Exception as err:
             notes.append("Could not export the web preview: %s" % err)
+        finally:
+            restore()
     return {"ok": True, "output": "\n".join(notes), "files": files}
 
 
