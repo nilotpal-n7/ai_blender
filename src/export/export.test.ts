@@ -54,6 +54,8 @@ describe("primitive meshes", () => {
 
     // A pine is many separate boughs, not one solid; src/shapes tests cover its winding.
     if (primitive === "pine") continue;
+    // Outline shapes keep their own points along sharp corners, so they are tested by volume instead.
+    const split = primitive === "lathe" || primitive === "extrude";
 
     it(primitive + " faces all point outward", () => {
       for (const face of mesh.faces) {
@@ -75,7 +77,7 @@ describe("primitive meshes", () => {
       }
     });
 
-    if (primitive !== "plane") {
+    if (primitive !== "plane" && !split) {
       it(primitive + " is watertight", () => {
         // In a closed, consistently wound mesh every directed edge has exactly one opposite.
         const edges = new Map<string, number>();

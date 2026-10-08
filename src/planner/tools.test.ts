@@ -236,3 +236,38 @@ describe("taper and rust", () => {
     expect(() => runTool(scene, "update_object", { id: "armor__brick", taper: [1.5, 1] })).toThrow(ToolError);
   });
 });
+
+describe("outlines", () => {
+  it("builds lathes and extrudes from outlines in any units", () => {
+    const { scene } = runTool(emptyScene(), "add_object", {
+      id: "bench",
+      name: "Bench",
+      position: [0, 0, 0],
+      parts: [
+        { name: "bottle", primitive: "lathe", position: [0, 0.14, 0], scale: [0.08, 0.28, 0.08], outline: [[0.04, 0], [0.04, 0.16], [0.013, 0.22], [0.013, 0.28]], material: red },
+        { name: "bracket", primitive: "extrude", position: [0.3, 0.15, 0], rotation: [90, 0, 0], scale: [0.2, 0.03, 0.3], outline: [[0, 0], [0.2, 0], [0.2, 0.05], [0.05, 0.05], [0.05, 0.3], [0, 0.3]], material: red },
+        { name: "knob", primitive: "lathe", position: [0.6, 0.05, 0], scale: [0.1, 0.1, 0.1], material: red },
+      ],
+    });
+    expect(scene.nodes.bench__bottle).toMatchObject({ primitive: "lathe", scale: [0.08, 0.28, 0.08] });
+    expect((scene.nodes.bench__bottle as { outline: number[][] }).outline[0]).toEqual([0.5, -0.5]);
+    expect((scene.nodes.bench__bracket as { outline: number[][] }).outline).toHaveLength(6);
+    // Without an outline it is the stock shape.
+    expect(scene.nodes.bench__knob).toMatchObject({ outline: null });
+  });
+
+  it("explains a bad outline, and one given to a shape that can't use it", () => {
+    const add = (part: object) => () =>
+      runTool(emptyScene(), "add_object", { id: "a", name: "A", position: [0, 0, 0], parts: [{ name: "p", position: [0, 0, 0], scale: [1, 1, 1], material: red, ...part }] });
+    expect(add({ primitive: "extrude", outline: [[0, 0], [1, 1], [2, 2]] })).toThrow(/outline of "p" can't be used.*enclose some area/);
+    expect(add({ primitive: "box", outline: [[0, 0], [1, 0], [1, 1]] })).toThrow(/only a lathe or an extrude takes an outline/);
+    expect(add({ primitive: "lathe", outline: [[0.1, 0]] })).toThrow(ToolError);
+  });
+
+  it("redraws an existing shape through update_object", () => {
+    let scene = runTool(emptyScene(), "add_object", { id: "vase", name: "Vase", position: [0, 0.2, 0], scale: [0.2, 0.4, 0.2], primitive: "lathe" }).scene;
+    scene = runTool(scene, "update_object", { id: "vase", outline: [[0.05, 0], [0.1, 0.2], [0.04, 0.4]] }).scene;
+    expect((scene.nodes.vase as { outline: number[][] }).outline).toEqual([[0.25, -0.5], [0.5, 0], [0.2, 0.5]]);
+    expect(() => runTool(scene, "update_object", { id: "vase", primitive: "box", outline: [[0, 0], [1, 0], [1, 1]] })).toThrow(/only a lathe or an extrude/);
+  });
+});

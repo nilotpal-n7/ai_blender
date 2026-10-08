@@ -5,7 +5,7 @@
  * the model reads the hierarchy directly and the scene costs few tokens.
  */
 
-import { roundVec } from "./math";
+import { round, roundVec } from "./math";
 import { childIds } from "./ops";
 import { DEFAULT_MATERIAL, type ChatStats, type Op, type Scene, type Track } from "./types";
 
@@ -30,6 +30,7 @@ function describeNode(scene: Scene, id: string): Described {
   if (node.kind === "mesh") out.primitive = node.primitive;
   if (node.kind === "mesh" && node.bevel > 0) out.bevel = node.bevel;
   if (node.kind === "mesh" && (node.taper[0] !== 1 || node.taper[1] !== 1)) out.taper = node.taper;
+  if (node.kind === "mesh" && node.outline) out.outline = node.outline.map(([a, b]) => [round(a, 3), round(b, 3)]);
   if (node.kind === "mesh" && node.array) {
     const { count, step, turn } = node.array;
     out.array = { count, ...(!isZero(step) && { step }), ...(!isZero(turn) && { turn }) };

@@ -258,6 +258,7 @@ export const useEditor = create<EditorState>()((set, get) => {
           bevel: 0,
           array: null,
           taper: [1, 1],
+          outline: null,
         },
         `Add ${primitive}`,
       );

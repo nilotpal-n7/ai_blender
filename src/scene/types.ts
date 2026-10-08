@@ -20,6 +20,8 @@ export const PRIMITIVES = [
   "torus",
   "plane",
   "wedge",
+  "lathe",
+  "extrude",
   "pine",
   "canopy",
   "rock",
@@ -36,6 +38,10 @@ export const PRIMITIVE_INFO: Record<Primitive, string> = {
   torus: "ring lying flat, outer diameter 1, tube thickness 0.25",
   plane: "1×1 flat square facing up (+Y); scale.y is ignored",
   wedge: "a ramp 1×1×1: full height at the back (−Z), sloping down to nothing at the front (+Z)",
+  lathe:
+    "an `outline` of [radius, height] points spun around the Y axis, fitted to 1 wide and 1 tall: bottles, wheels, domes, bowls, nozzles, anything turned",
+  extrude:
+    "a flat `outline` of [x, z] corners given thickness along Y, fitted to 1×1×1: brackets, gears, beams, tool heads, any cut-out plate",
   pine: "the needles of a conifer: drooping boughs in whorls, 1 wide and 1 tall, tapering to a tip",
   canopy: "a billowing mass of leaves 1×1×1, for the crown of a broadleaf tree or a bush",
   rock: "a weathered boulder 1×1×1, flatter underneath",
@@ -118,6 +124,10 @@ export const ArraySchema = z.object({
 });
 export type ArrayCopies = z.infer<typeof ArraySchema>;
 
+/** The points of a lathe's profile or an extrude's polygon, fitted to the unit box. */
+export const OutlineSchema = z.array(z.tuple([z.number(), z.number()])).min(2).max(64);
+export type Outline = z.infer<typeof OutlineSchema>;
+
 export const TaperSchema = z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]);
 export type Taper = z.infer<typeof TaperSchema>;
 
@@ -144,6 +154,8 @@ export const MeshNodeSchema = z.object({
    * along x and z. [1, 1] is straight; [0.5, 1] narrows the top to half along x.
    */
   taper: TaperSchema.default(() => [1, 1] as Taper),
+  /** Lathes and extrudes: the outline that gives them their shape. None means a stock one. */
+  outline: OutlineSchema.nullable().default(null),
 });
 export const LightNodeSchema = z.object({
   ...nodeBase,
@@ -270,6 +282,7 @@ export const NodePatchSchema = z
     bevel: z.number().min(0).max(1),
     array: ArraySchema.nullable(),
     taper: TaperSchema,
+    outline: OutlineSchema.nullable(),
     pinned: nodeBase.pinned,
   })
   .partial();

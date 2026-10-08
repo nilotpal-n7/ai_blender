@@ -5,10 +5,11 @@
  * ones are the very meshes the viewport draws.
  */
 
-import type { Primitive, Taper, Vec3 } from "@/scene/types";
+import type { Outline, Primitive, Taper, Vec3 } from "@/scene/types";
 import { beveledBox, frustumMesh, taperMesh, wedgeMesh } from "@/shapes/hard";
 import type { MeshData } from "@/shapes/mesh";
 import { canopyMesh, pineMesh, rockMesh } from "@/shapes/natural";
+import { isOutlined, outlineMesh } from "@/shapes/profile";
 
 export type { MeshData };
 
@@ -118,6 +119,8 @@ const builders: Record<Primitive, () => MeshData> = {
   torus,
   plane,
   wedge: wedgeMesh,
+  lathe: () => outlineMesh("lathe", null),
+  extrude: () => outlineMesh("extrude", null),
   pine: pineMesh,
   canopy: canopyMesh,
   rock: rockMesh,
@@ -147,6 +150,7 @@ export interface Shaped {
   scale: Vec3;
   bevel: number;
   taper: Taper;
+  outline: Outline | null;
 }
 
 /** Whether a mesh node narrows toward its top. Only boxes and cylinders can. */
@@ -154,11 +158,14 @@ export const isTapered = (node: Pick<Shaped, "primitive" | "taper">) =>
   (node.primitive === "box" || node.primitive === "cylinder") && (node.taper[0] !== 1 || node.taper[1] !== 1);
 
 /**
- * A name for a mesh node's shape when it has one of its own (a rounded or
- * tapered one), or null when it is just its primitive. Nodes with the same key
+ * A name for a mesh node's shape when it has one of its own (rounded, tapered
+ * or drawn from an outline), or null when it is just its primitive. Nodes with the same key
  * can share a mesh.
  */
 export function shapeKey(node: Shaped): string | null {
+  if (isOutlined(node.primitive)) {
+    return node.outline ? `${node.primitive} ${node.outline.map((p) => p.join(",")).join(" ")}` : null;
+  }
   const beveled = isBeveled(node);
   const tapered = isTapered(node);
   if (!beveled && !tapered) return null;
@@ -177,7 +184,8 @@ export function nodeMesh(node: Shaped): MeshData {
   if (key === null) return primitiveMesh(node.primitive);
   let mesh = shaped.get(key);
   if (!mesh) {
-    if (node.primitive === "cylinder") mesh = frustumMesh(node.taper);
+    if (isOutlined(node.primitive)) mesh = outlineMesh(node.primitive, node.outline);
+    else if (node.primitive === "cylinder") mesh = frustumMesh(node.taper);
     else {
       const box = isBeveled(node) ? beveledBox(node.scale, node.bevel) : primitiveMesh("box");
       mesh = isTapered(node) ? taperMesh(box, node.taper) : box;

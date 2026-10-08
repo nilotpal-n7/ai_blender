@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { round, roundVec } from "@/scene/math";
 import { OpError, applyOps, uniqueId } from "@/scene/ops";
+import { OUTLINE_INFO, fitOutline, isOutlined } from "@/shapes/profile";
 import {
   ANIMATABLE,
   ColorSchema,
@@ -19,6 +20,8 @@ import {
   PRIMITIVES,
   type ArrayCopies,
   type Op,
+  type Outline,
+  type Primitive,
   type Scene,
   type SceneNode,
   type Taper,
@@ -99,6 +102,17 @@ const taper = z
       "[0.6, 1] makes a trapezoid plate, [0.7, 0.7] a truncated pyramid or a nozzle. Armour, housings and " +
       "feet are rarely plain bricks; rotate the part to put the narrow end where it belongs.",
   );
+const outline = z
+  .array(z.array(z.number()).length(2))
+  .min(2)
+  .max(64)
+  .describe(
+    "Lathe and extrude only: the outline that makes the shape, in any units. Only its proportions count; " +
+      `\`scale\` sets the size, as for every primitive. Lathe: ${OUTLINE_INFO.lathe}, e.g. a bottle is ` +
+      "[[0.04, 0], [0.04, 0.16], [0.013, 0.22], [0.013, 0.28]]; start or end at radius 0 to close that end " +
+      `to a point, or come back down inside for a hollow bowl. Extrude: ${OUTLINE_INFO.extrude}, e.g. an L ` +
+      "bracket is [[0, 0], [0.2, 0], [0.2, 0.05], [0.05, 0.05], [0.05, 0.3], [0, 0.3]]; rotate the part to stand it up.",
+  );
 const array = z
   .object({
     count: z.number().int().min(1).max(64).describe("How many in total, the original included."),
@@ -125,6 +139,7 @@ const Part = z.object({
   material: NewMaterial,
   bevel: bevel.optional(),
   taper: taper.optional(),
+  outline: outline.optional(),
   array: array.optional(),
 });
 
@@ -153,6 +168,7 @@ const AddObject = z.object({
   blend: blend.optional(),
   bevel: bevel.optional(),
   taper: taper.optional(),
+  outline: outline.optional(),
   array: array.optional(),
 });
 
@@ -197,6 +213,7 @@ const UpdateObject = z.object({
   blend: blend.optional(),
   bevel: bevel.optional(),
   taper: taper.optional(),
+  outline: outline.optional(),
   array: array.nullable().optional().describe("New array for a part, or null to go back to a single copy."),
   material: MaterialChange.optional().describe("Only the material fields to change."),
   light: z.object(lightFields).partial().optional().describe("Only the light fields to change."),
@@ -298,6 +315,18 @@ function size(v: readonly number[] | undefined): Vec3 {
 }
 const vec = (v: readonly number[] | undefined): Vec3 => roundVec(v ?? [0, 0, 0]);
 const narrowing = (v: readonly number[] | undefined): Taper => [v?.[0] ?? 1, v?.[1] ?? 1];
+/** An outline as it is stored: fitted to the unit box. Only lathes and extrudes have one. */
+function drawn(primitive: Primitive, points: readonly number[][] | undefined, who: string): Outline | null {
+  if (!points) return null;
+  if (!isOutlined(primitive)) {
+    throw new ToolError(`"${who}" is a ${primitive}; only a lathe or an extrude takes an outline.`);
+  }
+  try {
+    return fitOutline(primitive, points).map(([a, b]) => [round(a, 5), round(b, 5)]);
+  } catch (err) {
+    throw new ToolError(`The outline of "${who}" can't be used: ${(err as Error).message}`);
+  }
+}
 /** A single copy is no array at all. */
 function copies(input: z.infer<typeof array> | null | undefined): ArrayCopies | null {
   if (!input || input.count < 2) return null;
@@ -331,6 +360,7 @@ function addObject(input: z.infer<typeof AddObject>, scene: Scene): Planned {
       material: input.material ?? { color: DEFAULT_MATERIAL.color },
       bevel: input.bevel,
       taper: input.taper,
+      outline: input.outline,
       array: input.array,
     });
     base.scale = [1, 1, 1];
@@ -345,6 +375,7 @@ function addObject(input: z.infer<typeof AddObject>, scene: Scene): Planned {
           bevel: input.bevel ?? 0,
           array: copies(input.array),
           taper: narrowing(input.taper),
+          outline: drawn(input.primitive, input.outline, input.id),
         }
       : { ...base, kind: "group", blend: input.blend ?? 0 };
 
@@ -368,6 +399,7 @@ function addObject(input: z.infer<typeof AddObject>, scene: Scene): Planned {
       bevel: part.bevel ?? 0,
       array: copies(part.array),
       taper: narrowing(part.taper),
+      outline: drawn(part.primitive, part.outline, part.name),
     };
   });
 
@@ -408,10 +440,13 @@ function addLight(input: z.infer<typeof AddLight>): Planned {
   return { ops: [{ type: "add", node }], result: `Added ${input.id}` };
 }
 
-function updateObject(input: z.infer<typeof UpdateObject>): Planned {
-  const { id, position, rotation, scale, array: repeat, taper: narrow, ...rest } = input;
+function updateObject(input: z.infer<typeof UpdateObject>, scene: Scene): Planned {
+  const { id, position, rotation, scale, array: repeat, taper: narrow, outline: points, ...rest } = input;
+  const current = scene.nodes[id];
+  const shape = input.primitive ?? (current?.kind === "mesh" ? current.primitive : undefined);
   const patch = {
     ...rest,
+    ...(points && shape && { outline: drawn(shape, points, id) }),
     ...(narrow && { taper: narrowing(narrow) }),
     ...(repeat !== undefined && { array: copies(repeat) }),
     ...(position && { position: vec(position) }),

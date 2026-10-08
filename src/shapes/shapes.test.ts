@@ -6,6 +6,7 @@ import { emptyScene, type GroupNode, type Primitive, type Vec3 } from "@/scene/t
 import { blendMesh, fusedMesh, fusedParts, isFused, type BlendPart } from "./blend";
 import { beveledBox, frustumMesh, roundedBoxMesh, taperMesh, wedgeMesh } from "./hard";
 import { icosphere, type MeshData } from "./mesh";
+import { DEFAULT_OUTLINE, extrudeMesh, fitOutline, latheMesh } from "./profile";
 import { canopyMesh, pineMesh, rockMesh } from "./natural";
 
 const part = (primitive: Primitive, overrides: Partial<BlendPart> = {}): BlendPart => ({
@@ -283,7 +284,7 @@ describe("hard-surface shapes", () => {
 
 describe("tapered shapes", () => {
   it("narrows a box toward its top and leaves the bottom alone", () => {
-    const mesh = nodeMesh({ primitive: "box", scale: [1, 1, 1], bevel: 0, taper: [0.5, 0.25] });
+    const mesh = nodeMesh({ primitive: "box", scale: [1, 1, 1], bevel: 0, taper: [0.5, 0.25], outline: null });
     const top = mesh.points.filter((p) => p[1] > 0);
     const bottom = mesh.points.filter((p) => p[1] < 0);
     expect(Math.max(...top.map((p) => p[0]))).toBeCloseTo(0.25, 9);
@@ -322,7 +323,7 @@ describe("tapered shapes", () => {
   });
 
   it("gives every distinct shape its own key, and plain primitives none", () => {
-    const plain = { primitive: "box" as const, scale: [1, 2, 3] as Vec3, bevel: 0, taper: [1, 1] as [number, number] };
+    const plain = { primitive: "box" as const, scale: [1, 2, 3] as Vec3, bevel: 0, taper: [1, 1] as [number, number], outline: null };
     expect(shapeKey(plain)).toBeNull();
     expect(nodeMesh(plain)).toBe(primitiveMesh("box"));
     expect(shapeKey({ ...plain, taper: [0.5, 1] })).toBe("box t0.5x1");
@@ -331,5 +332,88 @@ describe("tapered shapes", () => {
     // Only boxes and cylinders taper; a sphere ignores it.
     expect(shapeKey({ ...plain, primitive: "sphere", taper: [0.5, 0.5] })).toBeNull();
     expect(nodeMesh({ ...plain, taper: [0.5, 1] })).toBe(nodeMesh({ ...plain, scale: [9, 9, 9], taper: [0.5, 1] }));
+  });
+});
+
+describe("shapes from outlines", () => {
+  it("fits an outline drawn in any units to the unit box", () => {
+    // A bottle in meters: 8 cm wide, 28 cm tall.
+    const bottle = fitOutline("lathe", [[0.04, 0], [0.04, 0.16], [0.013, 0.22], [0.013, 0.28]]);
+    expect(bottle[0]).toEqual([0.5, -0.5]);
+    expect(bottle[3][0]).toBeCloseTo(0.1625, 9);
+    expect(bottle[3][1]).toBe(0.5);
+    // An L bracket, closed by repeating its first corner, which is dropped.
+    const bracket = fitOutline("extrude", [[0, 0], [0.2, 0], [0.2, 0.05], [0.05, 0.05], [0.05, 0.3], [0, 0.3], [0, 0]]);
+    expect(bracket).toHaveLength(6);
+    expect(bracket[0]).toEqual([-0.5, -0.5]);
+    expect(bracket[4]).toEqual([-0.25, 0.5]);
+  });
+
+  it("says what is wrong with an outline that can't make a shape", () => {
+    expect(() => fitOutline("lathe", [[0.1, 0], [0.1, 0]])).toThrow(/at least 2 different points/);
+    expect(() => fitOutline("lathe", [[-0.1, 0], [0.1, 1]])).toThrow(/can't be negative/);
+    expect(() => fitOutline("lathe", [[0.1, 0], [0.2, 0]])).toThrow(/some height/);
+    expect(() => fitOutline("extrude", [[0, 0], [1, 0]])).toThrow(/at least 3/);
+    expect(() => fitOutline("extrude", [[0, 0], [1, 1], [2, 2]])).toThrow(/enclose some area/);
+  });
+
+  it("a lathe of a straight side is a cylinder, whichever way the outline runs", () => {
+    for (const outline of [[[0.5, -0.5], [0.5, 0.5]], [[0.5, 0.5], [0.5, -0.5]]] as [number, number][][]) {
+      const mesh = latheMesh(outline);
+      const { min, max } = bounds(mesh);
+      min.forEach((v) => expect(v).toBeCloseTo(-0.5, 9));
+      max.forEach((v) => expect(v).toBeCloseTo(0.5, 9));
+      // Wound outward, and close to a true cylinder's volume.
+      expect(volume(mesh)).toBeCloseTo(Math.PI / 4, 2);
+      mesh.normals!.forEach((n, i) => {
+        const p = mesh.points[i];
+        expect(Math.hypot(...n)).toBeCloseTo(1, 9);
+        expect(n[0] * p[0] + n[1] * p[1] + n[2] * p[2]).toBeGreaterThan(0);
+      });
+    }
+  });
+
+  it("a lathe closes to a point on the axis and keeps sharp corners sharp", () => {
+    // A cone on a short drum: the shoulder is a sharp corner, so it has two normals.
+    const mesh = latheMesh([[0.5, -0.5], [0.5, 0], [0, 0.5]]);
+    expect(volume(mesh)).toBeCloseTo(Math.PI * 0.25 * 0.5 + (Math.PI * 0.25 * 0.5) / 3, 2);
+    const shoulder = mesh.points
+      .map((p, i) => ({ p, n: mesh.normals![i] }))
+      .filter(({ p }) => Math.abs(p[1]) < 1e-9 && Math.abs(p[2]) < 1e-9 && p[0] > 0);
+    expect(shoulder.map(({ n }) => n[1].toFixed(3)).sort()).toEqual(["0.000", "0.707"]);
+    // A hollow bowl comes back down inside: its inner wall faces the axis.
+    const bowl = latheMesh([[0, -0.5], [0.5, -0.3], [0.5, 0.5], [0.4, 0.5], [0.4, -0.2], [0, -0.4]]);
+    expect(volume(bowl)).toBeGreaterThan(0);
+    expect(volume(bowl)).toBeLessThan(volume(latheMesh([[0, -0.5], [0.5, -0.3], [0.5, 0.5]])) * 0.6);
+  });
+
+  it("an extrude has the outline's area, however it is wound and even when it is not convex", () => {
+    const bracket = fitOutline("extrude", [[0, 0], [0.2, 0], [0.2, 0.05], [0.05, 0.05], [0.05, 0.3], [0, 0.3]]);
+    // In the unit box the L covers this fraction of the square.
+    const area = (0.2 * 0.05 + 0.05 * 0.25) / (0.2 * 0.3);
+    for (const outline of [bracket, [...bracket].reverse()]) {
+      const mesh = extrudeMesh(outline);
+      expect(volume(mesh)).toBeCloseTo(area, 9);
+      const { min, max } = bounds(mesh);
+      min.forEach((v) => expect(v).toBeCloseTo(-0.5, 9));
+      max.forEach((v) => expect(v).toBeCloseTo(0.5, 9));
+      for (const n of mesh.normals!) expect(Math.hypot(...n)).toBeCloseTo(1, 9);
+    }
+    // Twelve corners approximating a circle shade as one round side: neighbours share a normal.
+    const round = extrudeMesh(Array.from({ length: 12 }, (_, i) => [0.5 * Math.cos(i * Math.PI / 6), 0.5 * Math.sin(i * Math.PI / 6)]));
+    const sides = round.normals!.slice(0, 12 * 4);
+    expect(sides[2]).toEqual(sides[4]);
+  });
+
+  it("nodes share a mesh per outline, and the stock shapes fill the unit box", () => {
+    const base = { scale: [1, 1, 1] as Vec3, bevel: 0, taper: [1, 1] as [number, number] };
+    const bottle = fitOutline("lathe", [[0.04, 0], [0.04, 0.16], [0.013, 0.28]]);
+    expect(shapeKey({ ...base, primitive: "lathe", outline: null })).toBeNull();
+    expect(shapeKey({ ...base, primitive: "lathe", outline: bottle })).toContain("lathe 0.5,-0.5");
+    expect(nodeMesh({ ...base, primitive: "lathe", outline: bottle })).toBe(nodeMesh({ ...base, scale: [3, 3, 3], primitive: "lathe", outline: bottle }));
+    expect(nodeMesh({ ...base, primitive: "extrude", outline: null })).toBe(primitiveMesh("extrude"));
+    for (const primitive of ["lathe", "extrude"] as const) {
+      expect(fitOutline(primitive, DEFAULT_OUTLINE[primitive])).toEqual(DEFAULT_OUTLINE[primitive].map((p) => p.map((n) => expect.closeTo(n, 9))));
+    }
   });
 });

@@ -39,6 +39,7 @@ const mesh = (id: string, parent: string | null = null): SceneNode => ({
   bevel: 0,
   array: null,
   taper: [1, 1],
+  outline: null,
 });
 const add = (node: SceneNode): Op => ({ type: "add", node });
 

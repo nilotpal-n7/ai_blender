@@ -166,6 +166,13 @@ function applyUpdate(scene: Scene, id: string, patch: NodePatch, author: Author)
     undo.taper = prev.taper;
     next.taper = patch.taper;
   }
+  if (patch.outline !== undefined) {
+    if (prev.kind !== "mesh" || next.kind !== "mesh") {
+      throw new OpError(`"${id}" is a ${prev.kind}; only meshes have an outline.`);
+    }
+    undo.outline = prev.outline;
+    next.outline = patch.outline;
+  }
   if (patch.material !== undefined) {
     if (prev.kind !== "mesh" || next.kind !== "mesh") {
       throw new OpError(`"${id}" is a ${prev.kind}; only meshes have a primitive and a material.`);

@@ -15,7 +15,7 @@ const base = {
 };
 const group = (id: string, parent: string | null = null): SceneNode => ({ ...base, id, name: id, parent, kind: "group", blend: 0 });
 const mesh = (id: string, parent: string | null = null): SceneNode => ({
-  ...base, id, name: id, parent, kind: "mesh", primitive: "box", material: { ...DEFAULT_MATERIAL }, bevel: 0, array: null, taper: [1, 1],
+  ...base, id, name: id, parent, kind: "mesh", primitive: "box", material: { ...DEFAULT_MATERIAL }, bevel: 0, array: null, taper: [1, 1], outline: null,
 });
 const key = (t: number, value: Vec3, ease: Key["ease"] = "smooth"): Key => ({ t, value, ease });
 

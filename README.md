@@ -31,7 +31,9 @@ This only works while that session is open and listening, and a reply takes as l
 
 ## How it works
 
-**The scene is a tree of nodes, stored as JSON.** A node is a group, a mesh or a light. A mesh is one of eleven unit-sized shapes: eight basic ones (box, sphere, cylinder, cone, pyramid, torus, plane, wedge) and three generated ones (pine needles, a leafy canopy, a rock). Things like a table are a group with meshes as parts. The conventions are fixed everywhere: Y up, meters, rotation in degrees, and shapes are unit-sized so a mesh's scale is its size.
+**The scene is a tree of nodes, stored as JSON.** A node is a group, a mesh or a light. A mesh is one of thirteen unit-sized shapes: eight basic ones (box, sphere, cylinder, cone, pyramid, torus, plane, wedge), two drawn from an outline (lathe, extrude) and three generated ones (pine needles, a leafy canopy, a rock). Things like a table are a group with meshes as parts. The conventions are fixed everywhere: Y up, meters, rotation in degrees, and shapes are unit-sized so a mesh's scale is its size.
+
+**Outlines make the shapes primitives can't.** A `lathe` spins an outline of [radius, height] points around its axis: bottles, bowls, wheels, domes. An `extrude` gives a flat polygon thickness: brackets, gears, beams, tool heads. The outline can be drawn in any units; it is fitted to the unit box, so the node's scale is still its size. Sharp corners in the outline stay crisp and gentle ones shade as a curve.
 
 **Hard surfaces get a few extras.** A box can have a `bevel`, a radius in meters that rounds its edges and corners. A box or cylinder can have a `taper`, which narrows its top into a trapezoid, a chamfered block or a nozzle. A mesh can have an `array`, which repeats it in a row or a ring (vent slats, bolts, fan blades).
 
@@ -128,6 +130,7 @@ npm run build
 ## Not built yet
 
 - Scanned or model-generated meshes. Everything is built from the shapes above, so people and animals come out as smooth sculpted figures, not photoreal ones; there is no text-to-mesh model behind an object.
+- Cuts and holes (booleans), subdivision and sculpting. Shapes are primitives, outlines and fused blobs.
 - Image textures. Finishes are a color with roughness, metalness, wear and rust; there is no fur, bark or fabric detail, and the UV maps the Blender export makes are there for your own texturing.
 - Rendering in Blender from the app. Export the script and render there, or record the viewport.
 - Skinning. Rigs move rigid parts; a fused body can be rigged joint by joint but its skin doesn't stretch across a bending joint.
