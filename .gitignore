@@ -1,28 +1,27 @@
-# ========================
-# Blender
-# ========================
-*.blend1
-*.blend2
+# dependencies
+/node_modules
 
-# ========================
-# Docker
-# ========================
-.docker/
+# next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
 
-# ========================
-# Environment
-# ========================
+# saved scenes (local data)
+/.data/
+
+# env files
 .env
 .env.local
 .env.*.local
 
-# ========================
-# IDE
-# ========================
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+# testing
+/coverage
+
+# misc
 .DS_Store
 Thumbs.db
+*.pem
+npm-debug.log*
+.vscode/
+.idea/

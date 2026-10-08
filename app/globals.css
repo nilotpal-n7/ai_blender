@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+/* Design tokens. Each becomes a utility: bg-panel, text-dim, border-line, … */
+@theme inline {
+  --color-bg: #0c0d12;
+  --color-panel: #13151c;
+  --color-raised: #1b1e28;
+  --color-hover: #232735;
+  --color-line: #272b3a;
+
+  --color-text: #e9eaf2;
+  --color-dim: #a3a7bd;
+  --color-faint: #6b7089;
+
+  --color-accent: #7c6cff;
+  --color-accent-soft: #7c6cff2e;
+  /* Marks things the user set by hand. */
+  --color-user: #ffb454;
+
+  --color-ok: #3ddc97;
+  --color-warn: #ffb454;
+  --color-err: #ff6b6b;
+
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/* In the base layer so utilities (outline-none, …) can override these. */
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    overflow: hidden;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+
+  /* Spinner arrows leave no room for the value in the narrow XYZ fields. */
+  input[type="number"] {
+    appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  /* Native color inputs draw their own frame; show only the swatch. */
+  input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+  input[type="color"]::-webkit-color-swatch {
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+  }
+  input[type="color"]::-moz-color-swatch {
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "ai-blender",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint app src scripts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "bridge": "node scripts/bridge.mjs listen"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.8.1",
+    "@react-three/postprocessing": "^3.1.3",
+    "lucide-react": "^1.52.0",
+    "next": "16.2.12",
+    "postprocessing": "^6.39.5",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "three": "^0.185.1",
+    "zod": "^4.6.5",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "^0.185.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.12",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  }
+}
