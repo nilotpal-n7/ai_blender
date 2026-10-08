@@ -12,7 +12,8 @@ also adds an "AI Blender" tab to the 3D viewport's sidebar, showing the same
 conversation as the web page.
 
 The co-pilot's code also gets `assets` (polyhaven.py, next to this file):
-scanned surfaces and HDRI skies, downloaded on first use.
+scanned surfaces, HDRI skies and ready-made props, downloaded on first use;
+and `fx` (effects.py): haze and puffs of dust.
 
 Only the standard library and what ships with Blender are used.
 """
@@ -39,6 +40,7 @@ import mathutils
 from mathutils import Euler, Matrix, Quaternion, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from effects import Effects  # noqa: E402
 from polyhaven import Library  # noqa: E402
 
 
@@ -91,6 +93,7 @@ NAMESPACE = {
     "Euler": Euler,
     "Quaternion": Quaternion,
     "assets": Library(ASSETS),
+    "fx": Effects(),
 }
 
 OUTPUT_LIMIT = 6000
@@ -331,10 +334,13 @@ def look(job):
             keep.set(look_shading, "show_object_outline", True)
 
         for index, (view, moment) in enumerate(shots):
+            # Back to the scene's own camera first: markers may then cut to another one for this frame.
+            scene.camera = own_camera
             if moment is not None and int(moment) != scene.frame_current:
                 scene.frame_set(int(moment))
-            if view == "camera" and own_camera:
-                scene.camera = own_camera
+            shot_camera = scene.camera
+            if view == "camera" and shot_camera:
+                scene.camera = shot_camera
             else:
                 if view == "camera" and index == 0:
                     notes.append("the scene has no camera, so this is a three-quarter view")

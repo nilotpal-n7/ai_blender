@@ -23,7 +23,7 @@ API = "https://api.polyhaven.com"
 # Poly Haven asks every client to say who it is.
 HEADERS = {"User-Agent": "ai-blender-studio/0.2"}
 INDEX_AGE = 7 * 24 * 3600
-KINDS = {"hdri": "hdris", "hdris": "hdris", "sky": "hdris", "texture": "textures", "textures": "textures", "material": "textures", "materials": "textures"}
+KINDS = {"hdri": "hdris", "hdris": "hdris", "sky": "hdris", "texture": "textures", "textures": "textures", "material": "textures", "materials": "textures", "model": "models", "models": "models", "prop": "models", "props": "models"}
 RESOLUTIONS = ("1k", "2k", "4k", "8k")
 # What a surface is made of, and the names Poly Haven files those maps under.
 MAPS = {
@@ -138,12 +138,12 @@ class Library:
 
     def search(self, kind, query="", limit=10):
         """
-        Finds assets by words. `kind` is "textures" or "hdris". Returns a list of
+        Finds assets by words. `kind` is "textures", "hdris" or "models". Returns a list of
         {id, name, tags, categories, size_m}, best match first; print it to read it.
         """
         kind = KINDS.get(str(kind).lower())
         if not kind:
-            raise AssetError('Search "textures" (scanned surfaces) or "hdris" (skies and rooms to light with).')
+            raise AssetError('Search "textures" (scanned surfaces), "hdris" (skies and rooms to light with) or "models" (ready-made props).')
         words = str(query).lower().replace(",", " ").split()
         found = []
         for asset_id, info in self._index(kind).items():
@@ -163,6 +163,43 @@ class Library:
                 item["size_m"] = round(info["dimensions"][0] / 1000, 2)
             results.append(item)
         return results
+
+    def model(self, asset_id, resolution="1k", collection=None):
+        """
+        Brings in a ready-made, textured 3D model (a barrel, a tyre, a crate, a rock,
+        a plant) at its real size and returns its objects. They are put in a collection
+        named after the model. To use it many times, copy an object and keep its mesh
+        (`copy = ob.copy()`), so a hundred barrels cost one. Dress a scene with these
+        instead of modelling every background prop.
+        """
+        files = self._files(asset_id)
+        sizes = isinstance(files.get("gltf"), dict) and self._sized(files["gltf"], resolution)
+        entry = sizes and sizes.get("gltf")
+        if not entry:
+            raise AssetError('"%s" is not a 3D model. Search "models" for one.' % asset_id)
+        name = entry["url"].rsplit("/", 1)[-1]
+        folder = ("models", asset_id, resolution)
+        path = self._cached(entry["url"], *folder, name)
+        for relative, part in (entry.get("include") or {}).items():
+            # Only ever inside the model's own folder, whatever the listing says.
+            pieces = [p for p in relative.replace("\\", "/").split("/") if p not in ("", ".", "..")]
+            self._cached(part["url"], *folder, *pieces)
+        before = set(bpy.data.objects)
+        try:
+            bpy.ops.import_scene.gltf(filepath=path)
+        except Exception as err:
+            raise AssetError('Blender could not load the model "%s": %s' % (asset_id, err))
+        objects = [ob for ob in bpy.data.objects if ob not in before]
+        home = collection or bpy.data.collections.get(asset_id) or bpy.data.collections.new(asset_id)
+        if home.name not in bpy.context.scene.collection.children and collection is None:
+            bpy.context.scene.collection.children.link(home)
+        for ob in objects:
+            for other in list(ob.users_collection):
+                other.objects.unlink(ob)
+            home.objects.link(ob)
+            ob.select_set(False)
+            ob["polyhaven"] = asset_id
+        return objects
 
     def maps(self, asset_id, resolution="2k", only=None):
         """Downloads a scanned surface's pictures and returns their paths by map: color, arm (occlusion, roughness, metal), roughness, metal, normal, height."""

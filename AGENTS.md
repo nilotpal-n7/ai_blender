@@ -29,6 +29,7 @@ The Blender studio (`src/blender/`, `blender/engine.py`, `app/b`, `app/api/blend
 - The co-pilot's Python runs in Blender unsandboxed. That is the point of the studio, and why every studio route goes through `respond` (local requests only) and why an engine must present the token the hub gave it. Keep both.
 - `blender/engine.py` uses only the standard library and what ships with Blender, and must work with and without a window. A look or a render has to leave the scene's settings and current frame as it found them (`Keep`). A job that runs long reports through `progress` and stops when that returns true; a video is encoded from its frames in a scene of its own.
 - `blender/polyhaven.py` is the co-pilot's `assets`. Its methods and docstrings are model-facing, and `BLENDER_PROMPT` describes them: change both together. It is the only code that reaches the internet, and only Poly Haven. A change to how an HDRI is placed or turned has to pass `blender -b --factory-startup --python blender/check_polyhaven.py`, which runs offline; a change to it only takes effect in a Blender started afterwards.
+- `blender/effects.py` is the co-pilot's `fx`, model-facing in the same way. Everything in it must work offline and leave nothing behind but ordinary Blender data (materials, a compositor tree) that a person can open and edit.
 - `src/blender/tools.ts` and `prompt.ts` are model-facing, like the planner's. `BLENDER_PROMPT` must stay free of anything request-specific or subject-specific.
 
 Checks: `npm test`, `npm run typecheck`, `npm run lint`.

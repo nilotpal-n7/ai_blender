@@ -43,7 +43,9 @@ It needs Blender installed (found automatically in its usual place, or set `BLEN
 - **Open in Blender** opens the same project in a Blender window. From then on the work happens there, in front of you, and each step is one undo. The **AI Blender** tab in the 3D viewport's sidebar holds the same conversation as the web page: type in either, read in both.
 - Close Blender and the next prompt carries on without a window, from the saved file. A Blender without a window leaves by itself after 15 idle minutes and comes back with the next prompt.
 
-The co-pilot also has [Poly Haven](https://polyhaven.com)'s free CC0 library at hand: photographed surfaces (colour, roughness, metalness, relief) and HDRI skies. It searches by words, downloads what it uses once into `.data/blender/assets/`, and builds the materials and the lighting from them, including paint that is chipped through to scanned metal along edges. This is the one thing in the studio that uses the internet; without a connection it falls back to Blender's own nodes.
+The co-pilot also has [Poly Haven](https://polyhaven.com)'s free CC0 library at hand: photographed surfaces (colour, roughness, metalness, relief) and HDRI skies. It searches by words, downloads what it uses once into `.data/blender/assets/`, and builds the materials and the lighting from them, including paint that is chipped through to scanned metal along edges. It can also bring in Poly Haven's ready-made props (barrels, tyres, crates, rocks, furniture) to dress a set. This is the one thing in the studio that uses the internet; without a connection it falls back to Blender's own nodes.
+
+Two effects ship with it and need nothing downloaded: haze, which fades a landscape toward a colour with distance, and soft puffs for dust, smoke or steam that are animated like any other object.
 
 A project is a folder in `.data/blender/<id>/`: `scene.blend` is the scene, and it is yours to open, edit and keep.
 
@@ -132,7 +134,8 @@ app/                 pages and API routes
   s/[id]             the editor
   b/[id]             the Blender studio
 blender/engine.py    runs inside Blender: does the app's jobs, adds the sidebar tab
-blender/polyhaven.py the co-pilot's asset library: scanned surfaces and HDRI skies
+blender/polyhaven.py the co-pilot's asset library: scanned surfaces, HDRI skies, props
+blender/effects.py   haze and puffs of dust or smoke
 src/
   blender/           the hub between app and Blender, project files, tools and prompt for Blender
   scene/             scene model, operations, undo inverses, animation sampling
@@ -168,7 +171,8 @@ In the Blender studio:
 - Selecting and editing objects on the web page. The page shows the model and the conversation; hands-on editing is done in Blender.
 - Procedural materials in the web preview: the preview shows what glTF can carry, the Picture tab shows the real thing.
 - Keeping Blender usable during a render started from the page: a Blender with a window is busy until the render ends.
-- Poly Haven's 3D models, and scanned textures in the web preview: surfaces projected without a UV map show there as their overall colour.
+- Scanned textures in the web preview: surfaces projected without a UV map show there as their overall colour.
+- Simulated smoke, fluid or cloth. Dust and smoke are puffs animated by hand, which is cheap and controllable but not physics.
 
 In both:
 

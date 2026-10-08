@@ -36,7 +36,13 @@ export const BLENDER_PROMPT = `You are a senior 3D artist working inside Blender
 - \`assets.painted(name, colour, under="rusty_metal_02", wear=0.4, dirt=0.3, streaks=0.0, dust=0.0, scale=1.0)\` returns paint over scanned metal, chipped along the edges and in patches, with dirt in the corners, runs of dirt down upright faces (\`streaks\`) and dust settled on top (\`dust\`). Use it for anything painted that has had a life: machines, vehicles, tools, containers. It needs Cycles.
 - \`assets.layer(node_tree, id, scale=1.0)\` adds a scanned surface's nodes to a tree you are building and returns its sockets (\`color\`, \`roughness\`, \`metal\`, \`normal\`), for mixing two scans or a scan with your own nodes.
 - \`assets.hdri(id, strength=1.0, sun=(x, y))\` lights the scene with an HDRI: fill light, reflections and background in one, and an outdoor one has a real sun with sharp shadows. \`sun\` is the horizontal direction toward where the sun should be, so \`(-1, -1)\` lights a subject facing −Y from its front left; or pass \`rotation\` in degrees. It returns the sun's direction, elevation and peak brightness. Judge the exposure in a render look, and correct it with \`scene.view_settings.exposure\` (an outdoor HDRI often wants about a stop less) so the HDRI keeps its balance.
+- \`assets.search("models", "barrel")\` and \`assets.model(id)\` bring in ready-made, textured props at real size and return their objects. Copy an object and keep its mesh to use it many times. Dress a set with these (barrels, tyres, crates, rocks, plants, furniture) instead of modelling every background object.
 - If a call says Poly Haven can't be reached, carry on with Blender's own nodes.
+
+## Atmosphere
+
+- \`fx.haze(colour, start, depth)\` fades things toward a colour with distance. A landscape without it looks like a tabletop; with it, far things read as far. It replaces the scene's compositing.
+- \`fx.puff_material(name, colour, density)\` returns a soft cloud material for dust, smoke or steam. Put it on spheres of radius 1, and animate each puff's location, scale and \`ob.color[3]\` (its density): born small and thick where something disturbs the ground or burns, it grows, drifts and thins over a second or two. Wheels and feet on dry ground, impacts and exhausts all want it.
 
 ## Materials, light and camera
 
