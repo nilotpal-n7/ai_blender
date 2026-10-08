@@ -97,6 +97,8 @@ NAMESPACE = {
 }
 
 OUTPUT_LIMIT = 6000
+# The longest a render look may take per picture, in seconds. What it has by then is what is shown.
+LOOK_SECONDS = 75
 LISTED_OBJECTS = 150
 # Object types that take up room, for framing a look.
 SOLID = {"MESH", "CURVE", "SURFACE", "FONT", "META", "VOLUME", "POINTCLOUD", "CURVES"}
@@ -317,6 +319,9 @@ def look(job):
         if shading == "render":
             if render.engine == "CYCLES":
                 keep.set(scene.cycles, "samples", min(scene.cycles.samples, 48))
+                # A look is a check, not a final picture: it must not tie Blender up for minutes.
+                limit = scene.cycles.time_limit
+                keep.set(scene.cycles, "time_limit", LOOK_SECONDS if limit <= 0 else min(limit, LOOK_SECONDS))
             elif hasattr(scene, "eevee"):
                 keep.set(scene.eevee, "taa_render_samples", min(scene.eevee.taa_render_samples, 24))
         else:

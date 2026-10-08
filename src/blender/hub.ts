@@ -74,6 +74,8 @@ interface Runtime {
   /** Answers the engine's open request: a job has arrived, or the engine was replaced. */
   wake: (() => void) | null;
   starting: Promise<void> | null;
+  /** The Blender this server started for the project, while it runs. */
+  child: ChildProcess | null;
   turn: ActiveTurn | null;
   /** Work that isn't a conversation turn, such as a render. */
   task: string | null;
@@ -112,6 +114,7 @@ function runtime(id: string): Runtime {
       waiting: new Map(),
       wake: null,
       starting: null,
+      child: null,
       turn: null,
       task: null,
       stopTask: false,
@@ -340,12 +343,14 @@ async function start(id: string, mode: EngineMode): Promise<void> {
     child = spawn(exe, args, { env, stdio: "ignore", detached: true });
     child.unref();
   }
+  rt.child = child;
   let failure: string | null = null;
   child.once("error", () => {
     failure = "Blender could not be started. Install it, or set BLENDER_PATH in .env.local to its executable.";
   });
   child.once("exit", () => {
     failure ??= "Blender closed before it connected. The project's engine.log may say why.";
+    if (rt.child === child) rt.child = null;
     if (rt.engine?.mode === mode) {
       rt.engine = null;
       failJobs(rt, "Blender was closed.");
@@ -385,8 +390,11 @@ async function call(id: string, spec: JobSpec, timeoutMs = JOB_TIMEOUT_MS): Prom
     };
     const timer = setTimeout(() => {
       drop();
-      // An engine that sat on a job this long is not coming back.
-      if (rt.engine?.working === job.id) rt.engine = null;
+      // An engine that sat on a job this long is taken to be gone, unless the Blender this
+      // server started is still running: then it is only busy, and a second Blender opened
+      // on the same file would be worse than waiting for it.
+      const running = rt.child !== null && rt.child.exitCode === null;
+      if (rt.engine?.working === job.id && !running) rt.engine = null;
       reject(new StudioError("Blender did not finish that step in time.", 504));
     }, timeoutMs);
     rt.waiting.set(job.id, {
